@@ -1,0 +1,10 @@
+github.com/JoelOtter/termloop v0.0.0-20210806173944-5f7c38744afb h1:wXR5fXM/+4VFARcWVtjwb0wxfQl5RxemkNzzs2Jb918=
+github.com/JoelOtter/termloop v0.0.0-20210806173944-5f7c38744afb/go.mod h1:Tie7OOEgasw91JpzA8UywemPyGehxZ06Gqtl5B1/vXI=
+github.com/grupawp/warships-gui v0.0.0-20230131115221-f28baa8caba5 h1:ab7xHPyKjlDEF+rX98lmbAcWiUIFP5z3iZphDLbZJuo=
+github.com/grupawp/warships-gui v0.0.0-20230131115221-f28baa8caba5/go.mod h1:IrfhZGcsxSdQG9tIJdGD5qf29/lygb5PsZPGrGhQVJY=
+github.com/mattn/go-runewidth v0.0.9 h1:Lm995f3rfxdpd6TSmuVCHVb/QhupuXlYr8sCI/QdE+0=
+github.com/mattn/go-runewidth v0.0.9/go.mod h1:H031xJmbD/WCDINGzjvQ9THkh0rPKHF+m2gUSrubnMI=
+github.com/nsf/termbox-go v1.1.1 h1:nksUPLCb73Q++DwbYUBEglYBRPZyoXJdrj5L+TkjyZY=
+github.com/nsf/termbox-go v1.1.1/go.mod h1:T0cTdVuOwf7pHQNtfhnEbzHbcNyCEcVU4YPpouCbVxo=
+golang.org/x/exp v0.0.0-20230321023759-10a507213a29 h1:ooxPy7fPvB4kwsA2h+iBNHkAbp/4JxTSwCmvdjEYmug=
+golang.org/x/exp v0.0.0-20230321023759-10a507213a29/go.mod h1:CxIveKay+FTh1D0yPZemJVgC/95VzuuOLq5Qi4xnoYc=
