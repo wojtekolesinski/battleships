@@ -23,3 +23,11 @@ type StatusData struct {
 type Board struct {
 	Board []string `json:"board"`
 }
+
+type FirePayload struct {
+	Coord string `json:"coord"`
+}
+
+type FireAnswer struct {
+	Result string `json:"result"`
+}

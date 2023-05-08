@@ -3,10 +3,12 @@ package app
 import (
 	"context"
 	"fmt"
-	gui "github.com/grupawp/warships-gui"
+	gui "github.com/grupawp/warships-gui/v2"
+	"github.com/mitchellh/go-wordwrap"
 	"github.com/wojtekolesinski/battleships/client"
-	"log"
+	"golang.org/x/exp/slog"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -14,7 +16,13 @@ type App struct {
 	client        *client.Client
 	playerBoard   [10][10]gui.State
 	opponentBoard [10][10]gui.State
-	state         client.StatusData
+	status        client.StatusData
+	gui           struct {
+		board1 *gui.Board
+		board2 *gui.Board
+		ui     *gui.GUI
+		text   *gui.Text
+	}
 }
 
 func New(c *client.Client) *App {
@@ -23,8 +31,23 @@ func New(c *client.Client) *App {
 	}
 }
 
+func (a *App) updateStatus(data client.StatusData) {
+	a.status.ShouldFire = data.ShouldFire
+	a.status.GameStatus = data.GameStatus
+	a.status.OppShots = data.OppShots
+	a.status.LastGameStatus = data.LastGameStatus
+	a.status.Timer = data.Timer
+}
+
+func (a *App) updateDescription(data client.StatusData) {
+	a.status.Nick = data.Nick
+	a.status.Desc = data.Desc
+	a.status.Opponent = data.Opponent
+	a.status.OppDesc = data.OppDesc
+}
+
 func (a *App) Run() error {
-	err := a.client.InitGame("testtt", "test", "", true)
+	err := a.client.InitGame("testtt", "Player description", "", true)
 	if err != nil {
 		return err
 	}
@@ -33,20 +56,106 @@ func (a *App) Run() error {
 	if err != nil {
 		return err
 	}
-	for status.GameStatus == "waiting_wpbot" {
+
+	for status.GameStatus != "game_in_progress" {
 		time.Sleep(time.Second)
 		status, err = a.client.GetStatus()
 		if err != nil {
 			return err
 		}
+		a.updateStatus(status)
 	}
-	board, err := a.client.GetBoard()
-	a.parseBoard(board)
+
+	status, err = a.client.GetDescription()
 	if err != nil {
 		return err
 	}
-	a.Render(board)
+	a.updateDescription(status)
 
+	board, err := a.client.GetBoard()
+	if err != nil {
+		return err
+	}
+
+	err = a.parseBoard(board)
+	if err != nil {
+		return err
+	}
+
+	a.InitGUI()
+
+	go func() {
+		for a.status.GameStatus == "game_in_progress" {
+			err = a.waitForYourTurn()
+			if err != nil {
+				return
+			}
+			slog.Info("app [Run]", slog.String("opp shots", strings.Join(a.status.OppShots, " ")), slog.Bool("shouldFire", a.status.ShouldFire))
+			a.updateBoard()
+
+			var answer client.FireAnswer
+
+			for answer.Result != "miss" {
+				coord := a.handleShot()
+
+				answer, err = a.client.Fire(coord)
+				if err != nil {
+					return
+				}
+
+				x, y, _ := parseCoords(coord)
+				switch answer.Result {
+				case "hit":
+					a.opponentBoard[x][y] = gui.Hit
+					a.gui.text.SetText("HIT")
+				case "miss":
+					a.opponentBoard[x][y] = gui.Miss
+					a.gui.text.SetText("MISS")
+					break
+				case "sunk":
+					a.opponentBoard[x][y] = gui.Hit
+					a.gui.text.SetText("SUNK")
+				}
+				slog.Info("app [Run] no break")
+				a.updateBoard()
+				time.Sleep(1 * time.Second)
+			}
+
+			status, err = a.client.GetStatus()
+			a.updateStatus(status)
+
+		}
+
+		if a.status.LastGameStatus == "win" {
+			a.gui.text.SetBgColor(gui.Green)
+			a.gui.text.SetFgColor(gui.White)
+			a.gui.text.SetText("You win")
+		} else {
+			a.gui.text.SetBgColor(gui.Red)
+			a.gui.text.SetFgColor(gui.White)
+			a.gui.text.SetText("You lose")
+		}
+	}()
+
+	a.gui.ui.Start(nil)
+
+	return nil
+}
+
+//func handleShot() {
+//
+//}
+
+func (a *App) waitForYourTurn() error {
+	for !a.status.ShouldFire {
+		time.Sleep(time.Second)
+		status, err := a.client.GetStatus()
+		if err != nil {
+			return err
+		}
+		a.updateStatus(status)
+	}
+	a.updateOppShots()
 	return nil
 }
 
@@ -60,12 +169,29 @@ func parseCoords(coords string) (int, int, error) {
 	return x, y, nil
 }
 
+func (a *App) updateOppShots() {
+	for _, coord := range a.status.OppShots {
+		x, y, _ := parseCoords(coord)
+
+		if a.playerBoard[x][y] == gui.Ship {
+			a.playerBoard[x][y] = gui.Hit
+		} else if a.playerBoard[x][y] == gui.Empty {
+			a.playerBoard[x][y] = gui.Miss
+		}
+	}
+}
+
 func (a *App) parseBoard(b client.Board) error {
 	a.playerBoard = [10][10]gui.State{}
 	a.opponentBoard = [10][10]gui.State{}
 	for i := range a.playerBoard {
 		a.playerBoard[i] = [10]gui.State{}
 		a.opponentBoard[i] = [10]gui.State{}
+
+		for j := range a.playerBoard[i] {
+			a.playerBoard[i][j] = gui.Empty
+			a.opponentBoard[i][j] = gui.Empty
+		}
 	}
 
 	for _, coords := range b.Board {
@@ -78,34 +204,56 @@ func (a *App) parseBoard(b client.Board) error {
 	return nil
 }
 
-func (a *App) Render(bo client.Board) {
-	ctx := context.TODO()
+func (a *App) InitGUI() {
+	ui := gui.NewGUI(true)
+	b1 := gui.NewBoard(2, 4, nil)
+	b2 := gui.NewBoard(50, 4, nil)
+	ui.Draw(b1)
+	ui.Draw(b2)
 
-	d := gui.NewDrawer(&gui.Config{})
-	b, err := d.NewBoard(2, 4, &gui.BoardConfig{})
-	b2, _ := d.NewBoard(50, 4, &gui.BoardConfig{})
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer d.RemoveBoard(ctx, b)
+	b1.SetStates(a.playerBoard)
+	b2.SetStates(a.opponentBoard)
 
-	//coords := d.DrawBoardAndCatchCoords(ctx, b, states) // draw empty board at position (2,4)
-	d.DrawBoard(ctx, b, a.playerBoard) // draw empty board at position (2,4)
+	exitInfo := gui.NewText(2, 2, "Press Ctrl+C to exit", nil) // initialize some text object
+	ui.Draw(exitInfo)
+	renderDescriptions(ui, a.status.Desc, a.status.OppDesc)
+	a.gui.board1 = b1
+	a.gui.board2 = b2
+	a.gui.ui = ui
+	a.gui.text = exitInfo
+}
 
-	d.DrawBoard(ctx, b2, a.opponentBoard) // draw empty board at position (2,4)
-
-	t, err := d.NewText(2, 2, nil) // initialize some text object
-	if err != nil {
-		log.Fatal(err)
-	}
-	t.SetText(fmt.Sprintf("You clicked: %v ", bo.Board))
-	d.DrawText(ctx, t)
-
+func (a *App) handleShot() string {
+	a.gui.text.SetText("Choose your target:")
 	for {
-		if !d.IsGameRunning() { // wait until escape character has been pressed
-			return
+		coords := a.gui.board2.Listen(context.TODO())
+		a.gui.text.SetText(fmt.Sprintf("Coordinate: %s", coords))
+		a.gui.ui.Log("Coordinate: %s", coords) // logs are displayed after the game exits
+
+		x, y, _ := parseCoords(coords)
+		if a.opponentBoard[x][y] != gui.Empty {
+			slog.Info("app [handleShot]", slog.Any("wrong_coord", coords), slog.Any("value", a.opponentBoard[x][y]))
+			a.gui.text.SetText("Choose again!")
+		} else {
+			slog.Info("app [handleShot]", slog.Any("correct_coord", coords), slog.Any("value", a.opponentBoard[x][y]))
+			return coords
 		}
 	}
+}
 
-	//client.StartGame()
+func (a *App) updateBoard() {
+	a.gui.board1.SetStates(a.playerBoard)
+	a.gui.board2.SetStates(a.opponentBoard)
+}
+
+func renderDescriptions(g *gui.GUI, playerDesc, oppDesc string) {
+	fragments := strings.Split(wordwrap.WrapString(playerDesc, 40), "\n")
+	for i, f := range fragments {
+		g.Draw(gui.NewText(2, 26+i, f, nil))
+	}
+
+	fragments = strings.Split(wordwrap.WrapString(oppDesc, 40), "\n")
+	for i, f := range fragments {
+		g.Draw(gui.NewText(50, 26+i, f, nil))
+	}
 }
