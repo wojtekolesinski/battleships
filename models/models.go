@@ -1,4 +1,4 @@
-package client
+package models
 
 type GamePayload struct {
 	Coords     []string `json:"coords,omitempty"`
@@ -30,4 +30,9 @@ type FirePayload struct {
 
 type FireAnswer struct {
 	Result string `json:"result"`
+}
+
+type ListData []struct {
+	GameStatus string `json:"game_status"`
+	Nick       string `json:"nick"`
 }

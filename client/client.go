@@ -3,15 +3,21 @@ package client
 import (
 	"bytes"
 	"encoding/json"
-	"golang.org/x/exp/slog"
+	"fmt"
+	"github.com/charmbracelet/log"
+	"github.com/wojtekolesinski/battleships/models"
 	"io"
 	"net/http"
 	"net/url"
 	"time"
 )
 
+var ErrUnauthorized = fmt.Errorf("unauthorized")
+var ErrForbidden = fmt.Errorf("forbidden")
+var ErrServiceUnavailable = fmt.Errorf("service unavailable")
+
 type Client struct {
-	client  http.Client
+	*http.Client
 	baseUrl string
 	token   string
 }
@@ -19,173 +25,268 @@ type Client struct {
 func NewClient(baseUrl string, timeout time.Duration) *Client {
 	return &Client{
 		baseUrl: baseUrl,
-		client: http.Client{
+		Client: &http.Client{
 			Timeout: timeout,
 		},
 	}
 }
 
+func (c *Client) newRequestWithToken(method string, path string, body io.Reader) (*http.Request, error) {
+	req, err := c.newRequest(method, path, body)
+	if err != nil {
+		return nil, fmt.Errorf("client.newRequest: %w", err)
+	}
+
+	req.Header.Set("X-Auth-Token", c.token)
+
+	return req, nil
+}
+
+func (c *Client) newRequest(method string, path string, body io.Reader) (*http.Request, error) {
+	path, err := url.JoinPath(c.baseUrl, path)
+	if err != nil {
+		return nil, fmt.Errorf("url.JoinPath: %w", err)
+	}
+
+	req, err := http.NewRequest(method, path, body)
+	if err != nil {
+		return nil, fmt.Errorf("http.newRequest: %w", err)
+	}
+
+	return req, nil
+}
+
 func (c *Client) InitGame(nick, desc, targetNick string, wpbot bool) error {
-	payload := GamePayload{Desc: desc, Nick: nick, TargetNick: targetNick, Wpbot: wpbot}
+	payload := models.GamePayload{Desc: desc, Nick: nick, TargetNick: targetNick, Wpbot: wpbot}
 	payloadJson, err := json.Marshal(payload)
 	if err != nil {
-		return err
+		return fmt.Errorf("json.Marshal: %w", err)
 	}
 
 	payloadReader := bytes.NewReader(payloadJson)
 
-	path, err := url.JoinPath(c.baseUrl, "/game")
+	req, err := c.newRequest(http.MethodPost, "/game", payloadReader)
 	if err != nil {
-		return err
+		return fmt.Errorf("client.newRequest: %w", err)
 	}
 
-	req, err := http.NewRequest(http.MethodPost, path, payloadReader)
+	log.Info("client [InitGame]", "payload", payload)
+
+	res, err := c.Do(req)
 	if err != nil {
-		return err
+		return fmt.Errorf("client.Do: %w", err)
 	}
 
-	slog.Info("client [InitGame]", slog.Any("payload", payload))
-
-	res, err := c.client.Do(req)
+	log.Info("client [InitGame]", "statusCode", res.StatusCode)
+	err = checkStatus(res.StatusCode)
 	if err != nil {
-		return err
+		log.Error("client [InitGame]", "client", fmt.Sprintf("%v", c))
+		return fmt.Errorf("checkStatus: %w", err)
 	}
-
-	slog.Info("client [InitGame]", slog.Int("statusCode", res.StatusCode))
 	c.token = res.Header.Get("X-Auth-Token")
-	slog.Info("client [InitGame]", slog.String("token", c.token))
+	log.Info("client [InitGame]", "token", c.token)
 	return nil
 }
 
-func (c *Client) GetStatus() (status StatusData, err error) {
-	path, err := url.JoinPath(c.baseUrl, "/game")
+func (c *Client) GetStatus() (models.StatusData, error) {
+	req, err := c.newRequestWithToken(http.MethodGet, "/game", nil)
 	if err != nil {
-		return
+		return models.StatusData{}, fmt.Errorf("client.newRequestWithToken: %w", err)
 	}
 
-	req, err := http.NewRequest(http.MethodGet, path, nil)
-	req.Header.Set("X-Auth-Token", c.token)
+	res, err := c.Do(req)
 	if err != nil {
-		return
+		return models.StatusData{}, fmt.Errorf("client.Do: %w", err)
 	}
-
-	res, err := c.client.Do(req)
-	if err != nil {
-		return
-	}
-	slog.Info("client [GetStatus]", slog.Int("statusCode", res.StatusCode))
 	defer res.Body.Close()
+	log.Info("client [GetStatus]", "statusCode", res.StatusCode)
+	err = checkStatus(res.StatusCode)
+	if err != nil {
+		log.Error("client [GetStatus]", "client", fmt.Sprintf("%v", c))
+		return models.StatusData{}, fmt.Errorf("checkStatus: %w", err)
+	}
 	body, err := io.ReadAll(res.Body)
 	if err != nil {
-		return
+		return models.StatusData{}, fmt.Errorf("io.ReadAll: %w", err)
 	}
+	var status models.StatusData
 	err = json.Unmarshal(body, &status)
 	if err != nil {
-		return
+		return models.StatusData{}, fmt.Errorf("json.Unmarshal: %w", err)
 	}
-	slog.Info("client [GetStatus]", slog.Any("status", status))
-	return
+	log.Info("client [GetStatus]", "status", status)
+	return status, nil
 }
 
-func (c *Client) GetBoard() (board Board, err error) {
-	path, err := url.JoinPath(c.baseUrl, "/game/board")
+func (c *Client) GetBoard() (models.Board, error) {
+	req, err := c.newRequestWithToken(http.MethodGet, "/game/board", nil)
 	if err != nil {
-		return
+		return models.Board{}, fmt.Errorf("client.newRequestWithToken: %w", err)
 	}
 
-	req, err := http.NewRequest(http.MethodGet, path, nil)
-	req.Header.Set("X-Auth-Token", c.token)
+	res, err := c.Do(req)
 	if err != nil {
-		return
+		return models.Board{}, fmt.Errorf("client.Do: %w", err)
 	}
-
-	res, err := c.client.Do(req)
-	if err != nil {
-		return
-	}
-
-	slog.Info("client [GetBoard]", slog.Int("statusCode", res.StatusCode))
 	defer res.Body.Close()
+
+	log.Info("client [GetBoard]", "statusCode", res.StatusCode)
+	err = checkStatus(res.StatusCode)
+	if err != nil {
+		log.Error("client [GetBoard]", "client", fmt.Sprintf("%v", c))
+		return models.Board{}, fmt.Errorf("checkStatus: %w", err)
+	}
 	body, err := io.ReadAll(res.Body)
 	if err != nil {
-		return
+		return models.Board{}, fmt.Errorf("io.ReadAll: %w", err)
 	}
-
+	var board models.Board
 	err = json.Unmarshal(body, &board)
-	slog.Info("client [GetBoard]", slog.Any("board", board.Board))
-	return
+	if err != nil {
+		return models.Board{}, fmt.Errorf("json.Unmarshal: %w", err)
+	}
+
+	log.Info("client [GetBoard]", "board", board.Board)
+	return board, nil
 }
 
-func (c *Client) GetDescription() (status StatusData, err error) {
-	path, err := url.JoinPath(c.baseUrl, "/game/desc")
+func (c *Client) GetDescription() (models.StatusData, error) {
+	req, err := c.newRequestWithToken(http.MethodGet, "/game/desc", nil)
 	if err != nil {
-		return
+		return models.StatusData{}, fmt.Errorf("client.newRequestWithToken: %w", err)
 	}
 
-	req, err := http.NewRequest(http.MethodGet, path, nil)
-	req.Header.Set("X-Auth-Token", c.token)
+	res, err := c.Do(req)
 	if err != nil {
-		return
+		return models.StatusData{}, fmt.Errorf("client.Do: %w", err)
 	}
-
-	res, err := c.client.Do(req)
-	if err != nil {
-		return
-	}
-
-	slog.Info("client [GetDescription]", slog.Int("statusCode", res.StatusCode))
 	defer res.Body.Close()
+
+	log.Info("client [GetDescription]", "statusCode", res.StatusCode)
+	err = checkStatus(res.StatusCode)
+	if err != nil {
+		log.Error("client [GetDescription]", "client", fmt.Sprintf("%v", c))
+		return models.StatusData{}, fmt.Errorf("checkStatus: %w", err)
+	}
 	body, err := io.ReadAll(res.Body)
 	if err != nil {
-		return
+		return models.StatusData{}, fmt.Errorf("io.ReadAll: %w", err)
 	}
+
+	var status models.StatusData
 	err = json.Unmarshal(body, &status)
 	if err != nil {
-		return
+		return models.StatusData{}, fmt.Errorf("json.Unmarshal: %w", err)
 	}
-	slog.Info("client [GetDescription]", slog.Any("status", status))
-	return
+	log.Info("client [GetDescription]", "status", status)
+	return status, nil
 }
 
-func (c *Client) Fire(coord string) (answer FireAnswer, err error) {
-	payload := FirePayload{Coord: coord}
+func (c *Client) Fire(coord string) (models.FireAnswer, error) {
+	payload := models.FirePayload{Coord: coord}
 	payloadJson, err := json.Marshal(payload)
 	if err != nil {
-		return
+		return models.FireAnswer{}, fmt.Errorf("json.Marshal: %w", err)
 	}
 
 	payloadReader := bytes.NewReader(payloadJson)
 
-	path, err := url.JoinPath(c.baseUrl, "/game/fire")
+	req, err := c.newRequestWithToken(http.MethodPost, "/game/fire", payloadReader)
 	if err != nil {
-		return
+		return models.FireAnswer{}, fmt.Errorf("client.newRequestWithToken: %w", err)
 	}
 
-	req, err := http.NewRequest(http.MethodPost, path, payloadReader)
-	req.Header.Set("X-Auth-Token", c.token)
+	log.Info("client [Fire]", "payload", payload)
+
+	res, err := c.Do(req)
 	if err != nil {
-		return
+		return models.FireAnswer{}, fmt.Errorf("client.Do: %w", err)
 	}
-
-	slog.Info("client [Fire]", slog.Any("payload", payload))
-
-	res, err := c.client.Do(req)
-	if err != nil {
-		return
-	}
-
-	slog.Info("client [Fire]", slog.Int("statusCode", res.StatusCode))
 	defer res.Body.Close()
+
+	log.Info("client [Fire]", "statusCode", res.StatusCode)
+	err = checkStatus(res.StatusCode)
+	if err != nil {
+		log.Error("client [Fire]", "client", fmt.Sprintf("%v", c))
+		return models.FireAnswer{}, fmt.Errorf("checkStatus: %w", err)
+	}
 	body, err := io.ReadAll(res.Body)
 	if err != nil {
-		return
+		return models.FireAnswer{}, fmt.Errorf("io.ReadAll: %w", err)
 	}
 
+	var answer models.FireAnswer
 	err = json.Unmarshal(body, &answer)
 	if err != nil {
-		return
+		return models.FireAnswer{}, fmt.Errorf("json.Unmarshal: %w", err)
 	}
-	slog.Info("client [Fire]", slog.Any("answer", answer))
+	log.Info("client [Fire]", "answer", answer)
 
-	return
+	return answer, nil
+}
+
+func (c *Client) GetPlayersList() (models.ListData, error) {
+	req, err := c.newRequest(http.MethodGet, "/game/list", nil)
+	if err != nil {
+		return models.ListData{}, fmt.Errorf("client.newRequest: %w", err)
+	}
+
+	res, err := c.Do(req)
+	if err != nil {
+		return models.ListData{}, fmt.Errorf("client.Do: %w", err)
+	}
+	defer res.Body.Close()
+
+	log.Info("client [GetPlayersList]", "statusCode", res.StatusCode)
+	err = checkStatus(res.StatusCode)
+	if err != nil {
+		log.Error("client [GetPlayersList]", "client", fmt.Sprintf("%v", c))
+		return models.ListData{}, fmt.Errorf("checkStatus: %w", err)
+	}
+
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		return models.ListData{}, fmt.Errorf("io.ReadAll: %w", err)
+	}
+	var data models.ListData
+	err = json.Unmarshal(body, &data)
+	if err != nil {
+		return models.ListData{}, fmt.Errorf("json.Unmarshal: %w", err)
+	}
+	log.Info("client [GetPlayersList]", "data", data)
+	return data, nil
+}
+
+func (c *Client) RefreshSession() error {
+	req, err := c.newRequestWithToken(http.MethodGet, "/game/refresh", nil)
+	if err != nil {
+		return fmt.Errorf("client.newRequestWithToken: %w", err)
+	}
+
+	res, err := c.Do(req)
+	if err != nil {
+		return fmt.Errorf("client.Do: %w", err)
+	}
+	defer res.Body.Close()
+
+	log.Info("client [RefreshSession]", "statusCode", res.StatusCode)
+	err = checkStatus(res.StatusCode)
+	if err != nil {
+		log.Error("client [RefreshSession]", "client", fmt.Sprintf("%v", c))
+		return fmt.Errorf("checkStatus: %w", err)
+	}
+	return nil
+}
+
+func checkStatus(status int) error {
+	switch status {
+	case 401:
+		return ErrUnauthorized
+	case 403:
+		return ErrForbidden
+	case 503:
+		return ErrServiceUnavailable
+	default:
+		return nil
+	}
 }

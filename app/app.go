@@ -2,27 +2,25 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"github.com/charmbracelet/log"
 	gui "github.com/grupawp/warships-gui/v2"
-	"github.com/mitchellh/go-wordwrap"
 	"github.com/wojtekolesinski/battleships/client"
-	"golang.org/x/exp/slog"
-	"strconv"
+	"github.com/wojtekolesinski/battleships/models"
 	"strings"
 	"time"
 )
+
+var ErrorGameEnded = fmt.Errorf("game ended")
+var maxRequests = 3
 
 type App struct {
 	client        *client.Client
 	playerBoard   [10][10]gui.State
 	opponentBoard [10][10]gui.State
-	status        client.StatusData
-	gui           struct {
-		board1 *gui.Board
-		board2 *gui.Board
-		ui     *gui.GUI
-		text   *gui.Text
-	}
+	status        models.StatusData
+	ui            *ui
 }
 
 func New(c *client.Client) *App {
@@ -31,142 +29,198 @@ func New(c *client.Client) *App {
 	}
 }
 
-func (a *App) updateStatus(data client.StatusData) {
-	a.status.ShouldFire = data.ShouldFire
-	a.status.GameStatus = data.GameStatus
-	a.status.OppShots = data.OppShots
-	a.status.LastGameStatus = data.LastGameStatus
-	a.status.Timer = data.Timer
-}
-
-func (a *App) updateDescription(data client.StatusData) {
-	a.status.Nick = data.Nick
-	a.status.Desc = data.Desc
-	a.status.Opponent = data.Opponent
-	a.status.OppDesc = data.OppDesc
-}
-
-func (a *App) Run() error {
-	err := a.client.InitGame("testtt", "Player description", "", true)
-	if err != nil {
-		return err
-	}
-
-	status, err := a.client.GetStatus()
-	if err != nil {
-		return err
-	}
-
-	for status.GameStatus != "game_in_progress" {
-		time.Sleep(time.Second)
+func (a *App) updateStatus() (err error) {
+	var status models.StatusData
+	makeRequest(func() error {
 		status, err = a.client.GetStatus()
-		if err != nil {
-			return err
-		}
-		a.updateStatus(status)
-	}
-
-	status, err = a.client.GetDescription()
-	if err != nil {
 		return err
-	}
-	a.updateDescription(status)
-
-	board, err := a.client.GetBoard()
+	})
 	if err != nil {
-		return err
+		return fmt.Errorf("client.GetStatus %w", err)
 	}
+	log.Info("app [updateStatus]", "status", status)
+	a.status.ShouldFire = status.ShouldFire
+	a.status.GameStatus = status.GameStatus
+	a.status.OppShots = status.OppShots
+	a.status.LastGameStatus = status.LastGameStatus
+	a.status.Timer = status.Timer
+	return
+}
 
-	err = a.parseBoard(board)
+func (a *App) updateDescription() (err error) {
+	var status models.StatusData
+	makeRequest(func() error {
+		status, err = a.client.GetDescription()
+		return err
+	})
 	if err != nil {
-		return err
+		return fmt.Errorf("client.GetDescription: %w", err)
+	}
+	log.SetDefault(log.Default().With("nick", status.Nick))
+	a.status.Nick = status.Nick
+	a.status.Desc = status.Desc
+	a.status.Opponent = status.Opponent
+	a.status.OppDesc = status.OppDesc
+	log.Info("app [updateDescription]", "status", a.status)
+	return nil
+}
+
+func (a *App) Run() (err error) {
+	name, desc := getNameAndDescription()
+	targetNick, playWithBot, err := a.getOpponent()
+	if err != nil {
+		return fmt.Errorf("app.getOpponent: %w", err)
 	}
 
-	a.InitGUI()
+	makeRequest(func() error {
+		err = a.client.InitGame(name, desc, targetNick, playWithBot)
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("client.InitGame: %w", err)
+	}
 
+	refreshCtx, cancelRefresh := context.WithCancel(context.Background())
+	defer cancelRefresh()
 	go func() {
-		for a.status.GameStatus == "game_in_progress" {
-			err = a.waitForYourTurn()
-			if err != nil {
+		for {
+			time.Sleep(10 * time.Second)
+			select {
+			case <-refreshCtx.Done():
 				return
-			}
-			slog.Info("app [Run]", slog.String("opp shots", strings.Join(a.status.OppShots, " ")), slog.Bool("shouldFire", a.status.ShouldFire))
-			a.updateBoard()
-
-			var answer client.FireAnswer
-
-			for answer.Result != "miss" {
-				coord := a.handleShot()
-
-				answer, err = a.client.Fire(coord)
+			default:
+				makeRequest(func() error {
+					err = a.client.RefreshSession()
+					return err
+				})
 				if err != nil {
-					return
+					log.Error("client.RefreshSession", err)
 				}
-
-				x, y, _ := parseCoords(coord)
-				switch answer.Result {
-				case "hit":
-					a.opponentBoard[x][y] = gui.Hit
-					a.gui.text.SetText("HIT")
-				case "miss":
-					a.opponentBoard[x][y] = gui.Miss
-					a.gui.text.SetText("MISS")
-					break
-				case "sunk":
-					a.opponentBoard[x][y] = gui.Hit
-					a.gui.text.SetText("SUNK")
-				}
-				slog.Info("app [Run] no break")
-				a.updateBoard()
-				time.Sleep(1 * time.Second)
 			}
-
-			status, err = a.client.GetStatus()
-			a.updateStatus(status)
-
-		}
-
-		if a.status.LastGameStatus == "win" {
-			a.gui.text.SetBgColor(gui.Green)
-			a.gui.text.SetFgColor(gui.White)
-			a.gui.text.SetText("You win")
-		} else {
-			a.gui.text.SetBgColor(gui.Red)
-			a.gui.text.SetFgColor(gui.White)
-			a.gui.text.SetText("You lose")
 		}
 	}()
 
-	a.gui.ui.Start(nil)
+	err = a.updateStatus()
+	if err != nil {
+		return fmt.Errorf("app.updateStatus: %w", err)
+	}
 
-	return nil
+	log.Info("app [Run] - waiting for the game to start")
+	for !a.gameInProgress() {
+		time.Sleep(time.Second)
+		err = a.updateStatus()
+		if err != nil {
+			return fmt.Errorf("app.updateStatus: %w", err)
+		}
+	}
+	cancelRefresh()
+
+	err = a.updateDescription()
+	if err != nil {
+		return fmt.Errorf("app.updateDescription: %w", err)
+	}
+
+	var board models.Board
+	makeRequest(func() error {
+		board, err = a.client.GetBoard()
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("client.GetBoard: %w", err)
+	}
+
+	log.Info("app [Run] - parsing board")
+	err = a.parseBoard(board)
+	if err != nil {
+		return fmt.Errorf("parseBoard: %w", err)
+	}
+	log.Info("app [Run] - initializing gui")
+	a.ui = newUi()
+	a.ui.renderDescriptions(a.status.Desc, a.status.OppDesc)
+	a.updateBoard()
+
+	errChan := make(chan error, 0)
+
+	uiCtx, stopUi := context.WithCancel(context.Background())
+	go func() {
+		log.Info("app [Run] - starting gameloop", "status", a.status)
+		for a.gameInProgress() {
+			err = a.waitForYourTurn()
+			if err != nil {
+				if errors.Is(err, ErrorGameEnded) {
+					log.Info("app [Run] - game ended")
+					break
+				}
+				errChan <- fmt.Errorf("app.waitForYourTurn: %w", err)
+				return
+			}
+
+			err = a.shoot()
+			if err != nil {
+				errChan <- fmt.Errorf("app.shoot: %w", err)
+				return
+			}
+
+			time.Sleep(1 * time.Second)
+			err = a.updateStatus()
+			if err != nil {
+				errChan <- fmt.Errorf("app.updateStatus: %w", err)
+				return
+			}
+		}
+		log.Info("app [Run] - exited gameloop")
+		a.updateOppShots()
+		a.updateBoard()
+		a.ui.renderGameResult(a.status.LastGameStatus)
+		stopUi()
+	}()
+
+	go func() {
+		for {
+			select {
+			case err = <-errChan:
+				stopUi()
+				errChan <- err
+			default:
+				time.Sleep(500 * time.Millisecond)
+			}
+		}
+	}()
+
+	log.Info("app [Run] - Starting ui")
+	a.ui.gui.Start(uiCtx, nil)
+
+	select {
+	case err = <-errChan:
+		return err
+	default:
+		return nil
+	}
 }
 
-//func handleShot() {
-//
-//}
+func (a *App) gameInProgress() bool {
+	return a.status.GameStatus == "game_in_progress"
+}
 
 func (a *App) waitForYourTurn() error {
+	log.Info("app [waitForYourTurn] - starting to wait")
+	a.ui.setInfoText("Opponent's turn")
+
 	for !a.status.ShouldFire {
-		time.Sleep(time.Second)
-		status, err := a.client.GetStatus()
+		time.Sleep(2 * time.Second)
+		err := a.updateStatus()
 		if err != nil {
-			return err
+			return fmt.Errorf("app.updateStatus: %w", err)
 		}
-		a.updateStatus(status)
+
+		if !a.gameInProgress() {
+			return ErrorGameEnded
+		}
 	}
 	a.updateOppShots()
+	a.updateBoard()
+	log.Info("app [waitForYourTurn]", "opp shots", strings.Join(a.status.OppShots, " "), "shouldFire", a.status.ShouldFire)
 	return nil
-}
-
-func parseCoords(coords string) (int, int, error) {
-	x := int(coords[0] - 'A')
-	y, err := strconv.Atoi(coords[1:])
-	y -= 1
-	if err != nil {
-		return -1, -1, err
-	}
-	return x, y, nil
 }
 
 func (a *App) updateOppShots() {
@@ -181,7 +235,7 @@ func (a *App) updateOppShots() {
 	}
 }
 
-func (a *App) parseBoard(b client.Board) error {
+func (a *App) parseBoard(b models.Board) error {
 	a.playerBoard = [10][10]gui.State{}
 	a.opponentBoard = [10][10]gui.State{}
 	for i := range a.playerBoard {
@@ -197,63 +251,129 @@ func (a *App) parseBoard(b client.Board) error {
 	for _, coords := range b.Board {
 		x, y, err := parseCoords(coords)
 		if err != nil {
-			return err
+			return fmt.Errorf("parseCoords: %w", err)
 		}
 		a.playerBoard[x][y] = gui.Ship
 	}
 	return nil
 }
 
-func (a *App) InitGUI() {
-	ui := gui.NewGUI(true)
-	b1 := gui.NewBoard(2, 4, nil)
-	b2 := gui.NewBoard(50, 4, nil)
-	ui.Draw(b1)
-	ui.Draw(b2)
+func (a *App) handleShot() (string, error) {
+	//err := a.updateStatus()
+	//if err != nil {
+	//	return "", fmt.Errorf("app.updateStatus: %w", err)
+	//}
+	log.Info("app [handleShot]", "status", a.status)
+	a.ui.updateTime(a.status.Timer)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				time.Sleep(time.Second)
+				a.status.Timer--
+				a.ui.updateTime(a.status.Timer)
+			}
+		}
+	}()
+	a.ui.setInfoText("Choose your target:")
+	for {
+		coords := a.ui.board2.Listen(context.TODO())
+		a.ui.setInfoText(fmt.Sprintf("Coordinate: %s", coords))
+		x, y, err := parseCoords(coords)
+		if err != nil {
+			return "", fmt.Errorf("parseCoords: %w", err)
+		}
 
-	b1.SetStates(a.playerBoard)
-	b2.SetStates(a.opponentBoard)
+		if a.opponentBoard[x][y] == gui.Empty {
+			log.Info("app [handleShot]", "correct_coord", coords, "value", a.opponentBoard[x][y])
+			cancel()
+			return coords, nil
+		}
 
-	exitInfo := gui.NewText(2, 2, "Press Ctrl+C to exit", nil) // initialize some text object
-	ui.Draw(exitInfo)
-	renderDescriptions(ui, a.status.Desc, a.status.OppDesc)
-	a.gui.board1 = b1
-	a.gui.board2 = b2
-	a.gui.ui = ui
-	a.gui.text = exitInfo
+		log.Info("app [handleShot]", "wrong_coord", coords, "value", a.opponentBoard[x][y])
+		a.ui.setInfoText("Choose again!")
+	}
 }
 
-func (a *App) handleShot() string {
-	a.gui.text.SetText("Choose your target:")
-	for {
-		coords := a.gui.board2.Listen(context.TODO())
-		a.gui.text.SetText(fmt.Sprintf("Coordinate: %s", coords))
-		a.gui.ui.Log("Coordinate: %s", coords) // logs are displayed after the game exits
-
-		x, y, _ := parseCoords(coords)
-		if a.opponentBoard[x][y] != gui.Empty {
-			slog.Info("app [handleShot]", slog.Any("wrong_coord", coords), slog.Any("value", a.opponentBoard[x][y]))
-			a.gui.text.SetText("Choose again!")
-		} else {
-			slog.Info("app [handleShot]", slog.Any("correct_coord", coords), slog.Any("value", a.opponentBoard[x][y]))
-			return coords
-		}
+func (a *App) getOpponent() (targetNick string, playWithBot bool, err error) {
+	playWithBot = promptPlayer("Do you want to play with a bot?")
+	if playWithBot {
+		return
 	}
+
+	var players models.ListData
+	fmt.Println("Fetching list of active players")
+	makeRequest(func() error {
+		players, err = a.client.GetPlayersList()
+		return err
+	})
+	if err != nil {
+		err = fmt.Errorf("client.GetPlayersList: %w", err)
+		return
+	}
+
+	if len(players) == 0 {
+		fmt.Println("No active players starting to wait for an invitation")
+		return
+	}
+
+	if promptPlayer("Do you want to join another player?") {
+		targetNick = players[promptListOfPlayers(players)].Nick
+		return
+	}
+	fmt.Println("Waiting for an invitation")
+	return
 }
 
 func (a *App) updateBoard() {
-	a.gui.board1.SetStates(a.playerBoard)
-	a.gui.board2.SetStates(a.opponentBoard)
+	a.ui.board1.SetStates(a.playerBoard)
+	a.ui.board2.SetStates(a.opponentBoard)
 }
 
-func renderDescriptions(g *gui.GUI, playerDesc, oppDesc string) {
-	fragments := strings.Split(wordwrap.WrapString(playerDesc, 40), "\n")
-	for i, f := range fragments {
-		g.Draw(gui.NewText(2, 26+i, f, nil))
-	}
+func (a *App) shoot() error {
+	var answer models.FireAnswer
+	for answer.Result != "miss" && a.gameInProgress() {
+		log.Info("app[Run] - handle shot")
+		coord, err := a.handleShot()
+		if err != nil {
+			return fmt.Errorf("handleShot: %w", err)
+		}
 
-	fragments = strings.Split(wordwrap.WrapString(oppDesc, 40), "\n")
-	for i, f := range fragments {
-		g.Draw(gui.NewText(50, 26+i, f, nil))
+		makeRequest(func() error {
+			answer, err = a.client.Fire(coord)
+			return err
+		})
+		if err != nil {
+			return fmt.Errorf("client.Fire: %w", err)
+		}
+
+		x, y, err := parseCoords(coord)
+		if err != nil {
+			return fmt.Errorf("parseCoords: %w", err)
+
+		}
+
+		switch answer.Result {
+		case "hit":
+			a.opponentBoard[x][y] = gui.Hit
+			a.ui.setInfoText("HIT")
+		case "miss":
+			a.opponentBoard[x][y] = gui.Miss
+			a.ui.setInfoText("MISS")
+		case "sunk":
+			a.opponentBoard[x][y] = gui.Hit
+			a.ui.setInfoText("SUNK")
+		}
+
+		a.updateBoard()
+		err = a.updateStatus()
+		if err != nil {
+			return fmt.Errorf("app.updateStatus: %w", err)
+		}
 	}
+	return nil
 }
