@@ -3,48 +3,33 @@ package app
 import (
 	"fmt"
 	"github.com/charmbracelet/log"
-	"github.com/wojtekolesinski/battleships/models"
 	"strconv"
 )
 
-func getNameAndDescription() (string, string) {
-	var name, desc string
+func promptList[T any](list []T, start int, mapper func(T) string) int {
+	for i, el := range list {
+		fmt.Printf("(%d)\t%s\n", start+i, mapper(el))
+	}
+
+	var res string
+	var choice int
 	for {
-		fmt.Print("Insert your name (leave blank to get one assigned): ")
-		_, err := fmt.Scanln(&name)
-		if err == nil || err.Error() == "unexpected newline" {
-			break
-		} else {
-			log.Error("app [getNameAndDescripiton]", "err", err, "name", name)
+		fmt.Print("Your choice: ")
+		_, err := fmt.Scanf("%s", &res)
+		if err != nil {
+			fmt.Printf("Try again 1 %s\n", err)
+			continue
+		}
+		choice, err = strconv.Atoi(res)
+		if err != nil {
+			fmt.Printf("Try again 2 %s\n", err)
+			continue
 		}
 
-	}
-
-	for {
-		fmt.Print("Insert your description (leave blank to get one assigned): ")
-		_, err := fmt.Scanln(&desc)
-		if err == nil || err.Error() == "unexpected newline" {
-			break
-		} else {
-			log.Error("app [getNameAndDescripiton]", "err", err, "desc", desc)
+		if choice >= start && choice < len(list)+start {
+			return choice
 		}
-
 	}
-
-	return name, desc
-
-}
-
-func promptListOfPlayers(data models.ListData) int {
-	for i, player := range data {
-		fmt.Printf("(%d)\t%s\t%s\n", i, player.Nick, player.GameStatus)
-	}
-	var res int
-	fmt.Print("Choose an opponent: ")
-	fmt.Scanf("%d", &res)
-	fmt.Printf("Chosen: %d\n", res)
-	return res
-
 }
 
 func makeRequest(target func() error) {
@@ -53,7 +38,7 @@ func makeRequest(target func() error) {
 		if err == nil {
 			return
 		}
-		log.Error("app [makeRequest]", err)
+		log.Error("app [makeRequest]", "err", err)
 	}
 }
 

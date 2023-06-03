@@ -8,6 +8,7 @@ import (
 	gui "github.com/grupawp/warships-gui/v2"
 	"github.com/wojtekolesinski/battleships/client"
 	"github.com/wojtekolesinski/battleships/models"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -20,12 +21,97 @@ type App struct {
 	playerBoard   [10][10]gui.State
 	opponentBoard [10][10]gui.State
 	status        models.StatusData
+	totalShots    int
+	hits          int
 	ui            *ui
 }
 
 func New(c *client.Client) *App {
 	return &App{
 		client: c,
+	}
+}
+
+func (a *App) Run() error {
+	a.getNameAndDescription()
+
+	for {
+		gamePayload, err := a.displayMenu()
+		if err != nil {
+			return fmt.Errorf("app.displayMenu: %w", err)
+		}
+
+		err = a.initGame(gamePayload)
+		if err != nil {
+			return fmt.Errorf("app.initGame: %w", err)
+		}
+
+		errChan := make(chan error, 0)
+		ctx, cancelFunc := context.WithCancel(context.Background())
+		go a.loop(ctx, errChan, cancelFunc)
+		go func() {
+			for {
+				select {
+				case err = <-errChan:
+					cancelFunc()
+					errChan <- err
+				default:
+					time.Sleep(500 * time.Millisecond)
+				}
+			}
+		}()
+
+		log.Info("app [Run] - Starting ui")
+		a.ui.gui.Start(ctx, nil)
+		log.Info("app [Run] - abandoning game")
+		err = a.client.AbandonGame()
+		if err != nil {
+			return fmt.Errorf("client.AbandonGame: %w", err)
+		}
+
+		select {
+		case err = <-errChan:
+			return err
+		default:
+			continue
+		}
+	}
+}
+
+func (a *App) loop(ctx context.Context, errChan chan error, cancelFunc context.CancelFunc) {
+	log.Info("app [Run] - starting gameloop", "status", a.status)
+	defer cancelFunc()
+	for a.gameInProgress() {
+		err := a.waitForYourTurn()
+		if err != nil {
+			if errors.Is(err, ErrorGameEnded) {
+				log.Info("app [Run] - game ended")
+				break
+			}
+			errChan <- fmt.Errorf("app.waitForYourTurn: %w", err)
+			return
+		}
+
+		err = a.shoot(ctx)
+		if err != nil {
+			errChan <- fmt.Errorf("app.shoot: %w", err)
+			return
+		}
+
+		time.Sleep(1 * time.Second)
+		err = a.updateStatus()
+		if err != nil {
+			errChan <- fmt.Errorf("app.updateStatus: %w", err)
+			return
+		}
+	}
+	log.Info("app [Run] - exited gameloop")
+	a.updateOppShots()
+	a.updateBoard()
+	a.ui.renderGameResult(a.status.LastGameStatus)
+	for i := 5; i > 0; i-- {
+		a.ui.setExitText(fmt.Sprintf("Exiting in %ds", i))
+		time.Sleep(1 * time.Second)
 	}
 }
 
@@ -65,139 +151,6 @@ func (a *App) updateDescription() (err error) {
 	return nil
 }
 
-func (a *App) Run() (err error) {
-	name, desc := getNameAndDescription()
-	targetNick, playWithBot, err := a.getOpponent()
-	if err != nil {
-		return fmt.Errorf("app.getOpponent: %w", err)
-	}
-
-	makeRequest(func() error {
-		err = a.client.InitGame(name, desc, targetNick, playWithBot)
-		return err
-	})
-	if err != nil {
-		return fmt.Errorf("client.InitGame: %w", err)
-	}
-
-	refreshCtx, cancelRefresh := context.WithCancel(context.Background())
-	defer cancelRefresh()
-	go func() {
-		for {
-			time.Sleep(10 * time.Second)
-			select {
-			case <-refreshCtx.Done():
-				return
-			default:
-				makeRequest(func() error {
-					err = a.client.RefreshSession()
-					return err
-				})
-				if err != nil {
-					log.Error("client.RefreshSession", err)
-				}
-			}
-		}
-	}()
-
-	err = a.updateStatus()
-	if err != nil {
-		return fmt.Errorf("app.updateStatus: %w", err)
-	}
-
-	log.Info("app [Run] - waiting for the game to start")
-	for !a.gameInProgress() {
-		time.Sleep(time.Second)
-		err = a.updateStatus()
-		if err != nil {
-			return fmt.Errorf("app.updateStatus: %w", err)
-		}
-	}
-	cancelRefresh()
-
-	err = a.updateDescription()
-	if err != nil {
-		return fmt.Errorf("app.updateDescription: %w", err)
-	}
-
-	var board models.Board
-	makeRequest(func() error {
-		board, err = a.client.GetBoard()
-		return err
-	})
-	if err != nil {
-		return fmt.Errorf("client.GetBoard: %w", err)
-	}
-
-	log.Info("app [Run] - parsing board")
-	err = a.parseBoard(board)
-	if err != nil {
-		return fmt.Errorf("parseBoard: %w", err)
-	}
-	log.Info("app [Run] - initializing gui")
-	a.ui = newUi()
-	a.ui.renderDescriptions(a.status.Desc, a.status.OppDesc)
-	a.updateBoard()
-
-	errChan := make(chan error, 0)
-
-	uiCtx, stopUi := context.WithCancel(context.Background())
-	go func() {
-		log.Info("app [Run] - starting gameloop", "status", a.status)
-		for a.gameInProgress() {
-			err = a.waitForYourTurn()
-			if err != nil {
-				if errors.Is(err, ErrorGameEnded) {
-					log.Info("app [Run] - game ended")
-					break
-				}
-				errChan <- fmt.Errorf("app.waitForYourTurn: %w", err)
-				return
-			}
-
-			err = a.shoot()
-			if err != nil {
-				errChan <- fmt.Errorf("app.shoot: %w", err)
-				return
-			}
-
-			time.Sleep(1 * time.Second)
-			err = a.updateStatus()
-			if err != nil {
-				errChan <- fmt.Errorf("app.updateStatus: %w", err)
-				return
-			}
-		}
-		log.Info("app [Run] - exited gameloop")
-		a.updateOppShots()
-		a.updateBoard()
-		a.ui.renderGameResult(a.status.LastGameStatus)
-		stopUi()
-	}()
-
-	go func() {
-		for {
-			select {
-			case err = <-errChan:
-				stopUi()
-				errChan <- err
-			default:
-				time.Sleep(500 * time.Millisecond)
-			}
-		}
-	}()
-
-	log.Info("app [Run] - Starting ui")
-	a.ui.gui.Start(uiCtx, nil)
-
-	select {
-	case err = <-errChan:
-		return err
-	default:
-		return nil
-	}
-}
-
 func (a *App) gameInProgress() bool {
 	return a.status.GameStatus == "game_in_progress"
 }
@@ -213,12 +166,13 @@ func (a *App) waitForYourTurn() error {
 			return fmt.Errorf("app.updateStatus: %w", err)
 		}
 
+		a.updateOppShots()
+		a.updateBoard()
+
 		if !a.gameInProgress() {
 			return ErrorGameEnded
 		}
 	}
-	a.updateOppShots()
-	a.updateBoard()
 	log.Info("app [waitForYourTurn]", "opp shots", strings.Join(a.status.OppShots, " "), "shouldFire", a.status.ShouldFire)
 	return nil
 }
@@ -233,6 +187,13 @@ func (a *App) updateOppShots() {
 			a.playerBoard[x][y] = gui.Miss
 		}
 	}
+}
+
+func (a *App) getAccuracy() float32 {
+	if a.totalShots == 0 {
+		return 0
+	}
+	return 100 * float32(a.hits) / float32(a.totalShots)
 }
 
 func (a *App) parseBoard(b models.Board) error {
@@ -258,14 +219,10 @@ func (a *App) parseBoard(b models.Board) error {
 	return nil
 }
 
-func (a *App) handleShot() (string, error) {
-	//err := a.updateStatus()
-	//if err != nil {
-	//	return "", fmt.Errorf("app.updateStatus: %w", err)
-	//}
+func (a *App) handleShot(ctx context.Context) (string, error) {
 	log.Info("app [handleShot]", "status", a.status)
 	a.ui.updateTime(a.status.Timer)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	go func() {
 		for {
@@ -299,13 +256,8 @@ func (a *App) handleShot() (string, error) {
 	}
 }
 
-func (a *App) getOpponent() (targetNick string, playWithBot bool, err error) {
-	playWithBot = promptPlayer("Do you want to play with a bot?")
-	if playWithBot {
-		return
-	}
-
-	var players models.ListData
+func (a *App) getOpponent() (targetNick string, err error) {
+	var players []models.ListData
 	fmt.Println("Fetching list of active players")
 	makeRequest(func() error {
 		players, err = a.client.GetPlayersList()
@@ -316,17 +268,38 @@ func (a *App) getOpponent() (targetNick string, playWithBot bool, err error) {
 		return
 	}
 
-	if len(players) == 0 {
-		fmt.Println("No active players starting to wait for an invitation")
-		return
+	players = append([]models.ListData{{Nick: "wp_bot"}}, players...)
+
+	choice := promptList(players, 0, func(a models.ListData) string { return a.Nick })
+
+	return players[choice].Nick, nil
+}
+
+func (a *App) getNameAndDescription() {
+	var name, desc string
+	for {
+		fmt.Print("Insert your name (leave blank to get one assigned): ")
+		_, err := fmt.Scanln(&name)
+		if err == nil || err.Error() == "unexpected newline" {
+			break
+		} else {
+			log.Error("app [getNameAndDescripiton]", "err", err, "name", name)
+		}
+
 	}
 
-	if promptPlayer("Do you want to join another player?") {
-		targetNick = players[promptListOfPlayers(players)].Nick
-		return
+	for {
+		fmt.Print("Insert your description (leave blank to get one assigned): ")
+		_, err := fmt.Scanln(&desc)
+		if err == nil || err.Error() == "unexpected newline" {
+			break
+		} else {
+			log.Error("app [getNameAndDescripiton]", "err", err, "desc", desc)
+		}
+
 	}
-	fmt.Println("Waiting for an invitation")
-	return
+	a.status.Nick = name
+	a.status.Desc = desc
 }
 
 func (a *App) updateBoard() {
@@ -334,11 +307,11 @@ func (a *App) updateBoard() {
 	a.ui.board2.SetStates(a.opponentBoard)
 }
 
-func (a *App) shoot() error {
+func (a *App) shoot(ctx context.Context) error {
 	var answer models.FireAnswer
 	for answer.Result != "miss" && a.gameInProgress() {
 		log.Info("app[Run] - handle shot")
-		coord, err := a.handleShot()
+		coord, err := a.handleShot(ctx)
 		if err != nil {
 			return fmt.Errorf("handleShot: %w", err)
 		}
@@ -357,23 +330,208 @@ func (a *App) shoot() error {
 
 		}
 
+		a.totalShots++
 		switch answer.Result {
 		case "hit":
 			a.opponentBoard[x][y] = gui.Hit
 			a.ui.setInfoText("HIT")
+			a.hits++
 		case "miss":
 			a.opponentBoard[x][y] = gui.Miss
 			a.ui.setInfoText("MISS")
 		case "sunk":
 			a.opponentBoard[x][y] = gui.Hit
 			a.ui.setInfoText("SUNK")
+			a.hits++
 		}
 
 		a.updateBoard()
+		a.ui.updateAccuracy(a.getAccuracy())
 		err = a.updateStatus()
 		if err != nil {
 			return fmt.Errorf("app.updateStatus: %w", err)
 		}
 	}
+	return nil
+}
+
+func (a *App) displayMenu() (models.GamePayload, error) {
+	choices := []string{
+		"Join a game",
+		"Wait for an opponent",
+		"Display top 10 stats",
+		"Display your stats",
+	}
+
+	choice := promptList(choices, 1, func(a string) string { return a })
+	log.Info("app [displayMenu]", "choice", choice)
+
+	switch choice {
+	case 1:
+		targetNick, err := a.getOpponent()
+		if err != nil {
+			return models.GamePayload{}, fmt.Errorf("app.getOpponent: %w", err)
+		}
+		return a.getGamePayload(targetNick), nil
+	case 2:
+		fmt.Println("Waiting for an invitation...")
+		return a.getGamePayload(""), nil
+	case 3:
+		err := a.displayTop10Stats()
+		if err != nil {
+			return models.GamePayload{}, fmt.Errorf("app.displayTop10Stats: %w", err)
+		}
+	case 4:
+		err := a.displayPlayerStats()
+		if err != nil {
+			return models.GamePayload{}, fmt.Errorf("app.displayPlayerStats: %w", err)
+		}
+	}
+	return a.displayMenu()
+}
+
+func (a *App) playGame() {
+
+}
+
+func (a *App) displayTop10Stats() error {
+	var stats models.StatsList
+	var err error
+	makeRequest(func() error {
+		stats, err = a.client.GetStats()
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("client.GetStats: %w", err)
+	}
+
+	fmt.Println()
+	fmt.Printf("| %4s | %-20s | %-5s | %4s | %6s |\n", "RANK", "NICK", "Games", "Wins", "Points")
+	for _, s := range stats.Stats {
+		fmt.Printf("| %4s | %-20s | %5s | %4s | %6s |\n",
+			strconv.Itoa(s.Rank),
+			s.Nick,
+			strconv.Itoa(s.Games),
+			strconv.Itoa(s.Wins),
+			strconv.Itoa(s.Points),
+		)
+	}
+	fmt.Println()
+	return nil
+}
+
+func (a *App) displayPlayerStats() error {
+	var stats models.StatsNick
+	var err error
+	makeRequest(func() error {
+		stats, err = a.client.GetPlayerStats(a.status.Nick)
+		return err
+	})
+	if err != nil {
+		if errors.Is(err, client.ErrNotFound) {
+			fmt.Println("\nNo stats for player\n")
+			return nil
+		}
+		return fmt.Errorf("client.GetPlayerStats: %w", err)
+	}
+
+	fmt.Println()
+	fmt.Printf("| %4s | %-20s | %-5s | %4s | %6s |\n", "RANK", "NICK", "Games", "Wins", "Points")
+	s := stats.Stats
+	fmt.Printf("| %4s | %-20s | %5s | %4s | %6s |\n",
+		strconv.Itoa(s.Rank),
+		s.Nick,
+		strconv.Itoa(s.Games),
+		strconv.Itoa(s.Wins),
+		strconv.Itoa(s.Points),
+	)
+
+	fmt.Println()
+	return nil
+}
+
+func (a *App) getGamePayload(targetNick string) models.GamePayload {
+	log.Info("app [getGamePayload]", "targetNick", targetNick)
+	payload := models.GamePayload{
+		Nick: a.status.Nick,
+		Desc: a.status.Desc,
+	}
+
+	if targetNick == "wp_bot" {
+		payload.Wpbot = true
+	} else {
+		payload.TargetNick = targetNick
+	}
+	return payload
+}
+
+func (a *App) initGame(payload models.GamePayload) error {
+	var err error
+	makeRequest(func() error {
+		err = a.client.InitGame(payload)
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("client.InitGame: %w", err)
+	}
+
+	refreshCtx, cancelRefresh := context.WithCancel(context.Background())
+	defer cancelRefresh()
+	go func() {
+		for {
+			time.Sleep(10 * time.Second)
+			select {
+			case <-refreshCtx.Done():
+				return
+			default:
+				makeRequest(func() error {
+					err = a.client.RefreshSession()
+					return err
+				})
+				if err != nil {
+					log.Error("client.RefreshSession", err)
+				}
+			}
+		}
+	}()
+
+	err = a.updateStatus()
+	if err != nil {
+		return fmt.Errorf("app.updateStatus: %w", err)
+	}
+
+	log.Info("app [initGame] - waiting for the game to start")
+	for !a.gameInProgress() {
+		time.Sleep(time.Second)
+		err = a.updateStatus()
+		if err != nil {
+			return fmt.Errorf("app.updateStatus: %w", err)
+		}
+	}
+	cancelRefresh()
+
+	err = a.updateDescription()
+	if err != nil {
+		return fmt.Errorf("app.updateDescription: %w", err)
+	}
+
+	var board models.Board
+	makeRequest(func() error {
+		board, err = a.client.GetBoard()
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("client.GetBoard: %w", err)
+	}
+
+	log.Info("app [initGame] - parsing board")
+	err = a.parseBoard(board)
+	if err != nil {
+		return fmt.Errorf("parseBoard: %w", err)
+	}
+	log.Info("app [initGame] - initializing gui")
+	a.ui = newUi()
+	a.ui.renderDescriptions(a.status.Desc, a.status.OppDesc)
+	a.updateBoard()
 	return nil
 }

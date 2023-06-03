@@ -32,7 +32,23 @@ type FireAnswer struct {
 	Result string `json:"result"`
 }
 
-type ListData []struct {
+type ListData struct {
 	GameStatus string `json:"game_status"`
 	Nick       string `json:"nick"`
+}
+
+type StatsData struct {
+	Nick   string `json:"nick"`
+	Games  int    `json:"games"`
+	Wins   int    `json:"wins"`
+	Rank   int    `json:"rank"`
+	Points int    `json:"points"`
+}
+
+type StatsList struct {
+	Stats []StatsData `json:"stats"`
+}
+
+type StatsNick struct {
+	Stats StatsData `json:"stats"`
 }

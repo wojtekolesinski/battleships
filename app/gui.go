@@ -24,23 +24,28 @@ func newUi() *ui {
 	board2 := gui.NewBoard(60, 6, nil)
 	exitText := gui.NewText(2, 2, "Press Ctrl+C to exit", nil)
 	infoText := gui.NewText(2, 4, "", nil)
-	timer := gui.NewText(50, 15, " 60s ", nil)
-	timer.SetBgColor(gui.NewColor(255, 0, 255))
-	timer.SetFgColor(gui.NewColor(10, 10, 10))
+	timer := gui.NewText(50, 15, " 60s ", &gui.TextConfig{
+		FgColor: gui.NewColor(10, 10, 10),
+		BgColor: gui.NewColor(255, 0, 255),
+	})
+	statsInfo := gui.NewText(50, 20, "0.00%", &gui.TextConfig{FgColor: gui.White, BgColor: gui.Black})
 
 	g.Draw(board1)
 	g.Draw(board2)
 	g.Draw(exitText)
 	g.Draw(infoText)
 	g.Draw(timer)
+	g.Draw(statsInfo)
+	g.Draw(gui.NewText(48, 19, "Accuracy:", nil))
 
 	return &ui{
-		gui:      g,
-		board1:   board1,
-		board2:   board2,
-		infoText: infoText,
-		exitText: exitText,
-		timer:    timer,
+		gui:       g,
+		board1:    board1,
+		board2:    board2,
+		infoText:  infoText,
+		exitText:  exitText,
+		timer:     timer,
+		statsInfo: statsInfo,
 	}
 }
 
@@ -61,6 +66,10 @@ func (u *ui) setInfoText(text string) {
 	u.infoText.SetText(text)
 }
 
+func (u *ui) setExitText(text string) {
+	u.exitText.SetText(text)
+}
+
 func (u *ui) renderGameResult(result string) {
 	if result == "win" {
 		u.infoText.SetBgColor(gui.Green)
@@ -71,7 +80,7 @@ func (u *ui) renderGameResult(result string) {
 		u.infoText.SetFgColor(gui.White)
 		u.setInfoText("You lose")
 	} else {
-
+		// TODO
 	}
 }
 
@@ -81,6 +90,11 @@ func (u *ui) updateTime(time int) {
 		u.timer.SetBgColor(gui.NewColor(250, 0, 0))
 	} else if time > 55 {
 		u.timer.SetBgColor(gui.NewColor(255, 0, 255))
-
+	} else {
+		// TODO
 	}
+}
+
+func (u *ui) updateAccuracy(accuracy float32) {
+	u.statsInfo.SetText(fmt.Sprintf("%.2f%%", accuracy))
 }
