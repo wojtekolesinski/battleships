@@ -10,42 +10,46 @@ import (
 )
 
 func (a *App) displayMenu() (models.GamePayload, error) {
-	choices := []string{
-		"Join a game",
-		"Wait for an opponent",
-		"Display top 10 stats",
-		"Display your stats",
-		"Modify your board",
+	for {
+		choices := []string{
+			"Join a game",
+			"Wait for an opponent",
+			"Display top 10 stats",
+			"Display your stats",
+			"Modify your board",
+		}
+
+		choice := promptList(choices, 1, func(a string) string { return a })
+		log.Debug("app [displayMenu]", "choice", choice)
+
+		switch choice {
+		case 1:
+			targetNick, err := a.getOpponent()
+			if err != nil {
+				return models.GamePayload{}, fmt.Errorf("app.getOpponent: %w", err)
+			}
+			return a.getGamePayload(targetNick), nil
+		case 2:
+			fmt.Println("Waiting for an invitation...")
+			return a.getGamePayload(""), nil
+		case 3:
+			err := a.displayTop10Stats()
+			if err != nil {
+				return models.GamePayload{}, fmt.Errorf("app.displayTop10Stats: %w", err)
+			}
+		case 4:
+			err := a.displayPlayerStats()
+			if err != nil {
+				return models.GamePayload{}, fmt.Errorf("app.displayPlayerStats: %w", err)
+			}
+		case 5:
+			err := a.editBoard()
+			if err != nil {
+				return models.GamePayload{}, fmt.Errorf("app.editBoard: %w", err)
+			}
+		}
 	}
 
-	choice := promptList(choices, 1, func(a string) string { return a })
-	log.Info("app [displayMenu]", "choice", choice)
-
-	switch choice {
-	case 1:
-		targetNick, err := a.getOpponent()
-		if err != nil {
-			return models.GamePayload{}, fmt.Errorf("app.getOpponent: %w", err)
-		}
-		return a.getGamePayload(targetNick), nil
-	case 2:
-		fmt.Println("Waiting for an invitation...")
-		return a.getGamePayload(""), nil
-	case 3:
-		err := a.displayTop10Stats()
-		if err != nil {
-			return models.GamePayload{}, fmt.Errorf("app.displayTop10Stats: %w", err)
-		}
-	case 4:
-		err := a.displayPlayerStats()
-		if err != nil {
-			return models.GamePayload{}, fmt.Errorf("app.displayPlayerStats: %w", err)
-		}
-	case 5:
-		a.editBoard()
-		return a.displayMenu()
-	}
-	return a.displayMenu()
 }
 
 func (a *App) displayTop10Stats() error {

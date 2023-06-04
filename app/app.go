@@ -24,6 +24,7 @@ type App struct {
 	hits          int
 	ui            *ui
 	customBoard   bool
+	oppFleet      map[int]int
 }
 
 func New(c *client.Client) *App {
@@ -63,10 +64,17 @@ func (a *App) Run() error {
 
 		log.Info("app [Run] - Starting ui")
 		a.ui.gui.Start(ctx, nil)
-		log.Info("app [Run] - abandoning game")
-		err = a.client.AbandonGame()
+		err = a.updateStatus()
 		if err != nil {
-			return fmt.Errorf("client.AbandonGame: %w", err)
+			return fmt.Errorf("app.updateStatus: %w", err)
+		}
+
+		if a.gameInProgress() {
+			log.Info("app [Run] - abandoning game")
+			err = a.client.AbandonGame()
+			if err != nil {
+				return fmt.Errorf("client.AbandonGame: %w", err)
+			}
 		}
 
 		select {
@@ -133,12 +141,15 @@ func (a *App) waitForYourTurn() error {
 			return ErrorGameEnded
 		}
 	}
-	log.Info("app [waitForYourTurn]", "opp shots", strings.Join(a.status.OppShots, " "), "shouldFire", a.status.ShouldFire)
+
+	a.updateOppShots()
+	a.updateBoard()
+	log.Debug("app [waitForYourTurn]", "opp shots", strings.Join(a.status.OppShots, " "), "shouldFire", a.status.ShouldFire)
 	return nil
 }
 
 func (a *App) handleShot(ctx context.Context) (string, error) {
-	log.Info("app [handleShot]", "status", a.status)
+	log.Debug("app [handleShot]", "status", a.status)
 	a.ui.updateTime(a.status.Timer)
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -164,12 +175,12 @@ func (a *App) handleShot(ctx context.Context) (string, error) {
 		}
 
 		if a.opponentBoard[x][y] == gui.Empty {
-			log.Info("app [handleShot]", "correct_coord", coords, "value", a.opponentBoard[x][y])
+			log.Debug("app [handleShot]", "correct_coord", coords, "value", a.opponentBoard[x][y])
 			cancel()
 			return coords, nil
 		}
 
-		log.Info("app [handleShot]", "wrong_coord", coords, "value", a.opponentBoard[x][y])
+		log.Warn("app [handleShot]", "wrong_coord", coords, "value", a.opponentBoard[x][y])
 		a.ui.setInfoText("Choose again!")
 	}
 }
@@ -177,7 +188,7 @@ func (a *App) handleShot(ctx context.Context) (string, error) {
 func (a *App) shoot(ctx context.Context) error {
 	var answer models.FireAnswer
 	for answer.Result != "miss" && a.gameInProgress() {
-		log.Info("app[Run] - handle shot")
+		log.Debug("app[Run] - handle shot")
 		coord, err := a.handleShot(ctx)
 		if err != nil {
 			return fmt.Errorf("handleShot: %w", err)
@@ -209,6 +220,7 @@ func (a *App) shoot(ctx context.Context) error {
 		case "sunk":
 			a.opponentBoard[x][y] = gui.Hit
 			a.ui.setInfoText("SUNK")
+			a.handleSunk(x, y)
 			a.hits++
 		}
 
@@ -223,6 +235,8 @@ func (a *App) shoot(ctx context.Context) error {
 }
 
 func (a *App) initGame(payload models.GamePayload) error {
+	a.reset()
+
 	var err error
 	makeRequest(func() error {
 		err = a.client.InitGame(payload)
@@ -246,7 +260,7 @@ func (a *App) initGame(payload models.GamePayload) error {
 					return err
 				})
 				if err != nil {
-					log.Error("client.RefreshSession", err)
+					log.Error("app [initGame]", "err", fmt.Errorf("client.RefreshSession: %w", err))
 				}
 			}
 		}
@@ -287,7 +301,9 @@ func (a *App) initGame(payload models.GamePayload) error {
 		return fmt.Errorf("parseBoard: %w", err)
 	}
 	log.Info("app [initGame] - initializing gui")
+
 	a.ui = newGameUi()
+	a.ui.renderNicks(a.status.Nick, a.status.Opponent)
 	a.ui.renderDescriptions(a.status.Desc, a.status.OppDesc)
 	a.updateBoard()
 	return nil
@@ -316,7 +332,7 @@ func (a *App) editBoard() error {
 		for length := 4; length >= 1; length-- {
 			count := fleet[length]
 			for s := 0; s < count; s++ {
-				ship := []point{}
+				var ship []point
 				ui.setInfoText(fmt.Sprintf("Placing ship with length: %d (%d/%d)", length, s+1, count))
 
 				for i := range board {
@@ -340,8 +356,9 @@ func (a *App) editBoard() error {
 						if board[x][y] == gui.Hit {
 							ship = append(ship, point{x, y})
 							board[x][y] = gui.Ship
+							clearHits(&board)
 							setPossiblePositions(&board, ship)
-							log.Info("app [editBoard]", "board", board)
+							log.Debug("app [editBoard]", "board", board)
 							ui.board1.SetStates(board)
 							break
 						}
@@ -349,8 +366,10 @@ func (a *App) editBoard() error {
 					}
 				}
 
+				clearHits(&board)
 				setImpossiblePositions(&board, ship)
 				ui.board1.SetStates(board)
+				getShip(board, ship[0].x, ship[0].y)
 			}
 		}
 
@@ -371,7 +390,21 @@ func (a *App) editBoard() error {
 	return nil
 }
 
-func setPossiblePositions(board *[10][10]gui.State, ship []point) {
+func (a *App) handleSunk(x, y int) {
+	log.Debug("app [handleSunk]", "x", x, "y", y)
+	ship := getShip(a.opponentBoard, x, y)
+	setImpossiblePositions(&a.opponentBoard, ship)
+	a.oppFleet[len(ship)]--
+	a.ui.setFleetInfo(a.oppFleet)
+}
+
+func (a *App) reset() {
+	a.oppFleet = map[int]int{4: 1, 3: 2, 2: 3, 1: 4}
+	a.hits = 0
+	a.totalShots = 0
+}
+
+func clearHits(board *[10][10]gui.State) {
 	for i := range board {
 		for j := range board[i] {
 			if board[i][j] == gui.Hit {
@@ -379,7 +412,9 @@ func setPossiblePositions(board *[10][10]gui.State, ship []point) {
 			}
 		}
 	}
+}
 
+func setPossiblePositions(board *[10][10]gui.State, ship []point) {
 	neighbours := []point{
 		{0, 1},
 		{1, 0},
@@ -388,14 +423,14 @@ func setPossiblePositions(board *[10][10]gui.State, ship []point) {
 	}
 
 	for _, p := range ship {
-		log.Info("app [setPossiblePositions]", "ship", p)
+		log.Debug("app [setPossiblePositions]", "ship", p)
 		for _, offset := range neighbours {
 			n := point{p.x + offset.x, p.y + offset.y}
 			if n.x < 0 || n.x >= 10 || n.y < 0 || n.y >= 10 {
 				continue
 			}
 
-			log.Info("app [setPossiblePositions]", "neighbour", n)
+			log.Debug("app [setPossiblePositions]", "neighbour", n)
 
 			if board[n.x][n.y] == gui.Empty {
 				board[n.x][n.y] = gui.Hit
@@ -403,18 +438,10 @@ func setPossiblePositions(board *[10][10]gui.State, ship []point) {
 		}
 	}
 
-	log.Info("app [setPossiblePositions]", "board", board)
+	log.Debug("app [setPossiblePositions]", "board", board)
 }
 
 func setImpossiblePositions(board *[10][10]gui.State, ship []point) {
-	for i := range board {
-		for j := range board[i] {
-			if board[i][j] == gui.Hit {
-				board[i][j] = gui.Empty
-			}
-		}
-	}
-
 	neighbours := []point{
 		{0, 1},
 		{1, 1},
@@ -427,14 +454,14 @@ func setImpossiblePositions(board *[10][10]gui.State, ship []point) {
 	}
 
 	for _, p := range ship {
-		log.Info("app [setImpossiblePositions]", "ship", p)
+		log.Debug("app [setImpossiblePositions]", "ship", p)
 		for _, offset := range neighbours {
 			n := point{p.x + offset.x, p.y + offset.y}
 			if n.x < 0 || n.x >= 10 || n.y < 0 || n.y >= 10 {
 				continue
 			}
 
-			log.Info("app [setImpossiblePositions]", "neighbour", n)
+			log.Debug("app [setImpossiblePositions]", "neighbour", n)
 
 			if board[n.x][n.y] == gui.Empty {
 				board[n.x][n.y] = gui.Miss
@@ -442,5 +469,38 @@ func setImpossiblePositions(board *[10][10]gui.State, ship []point) {
 		}
 	}
 
-	log.Info("app [setImpossiblePositions]", "board", board)
+	log.Debug("app [setImpossiblePositions]", "board", board)
+}
+
+func getShip(board [10][10]gui.State, x, y int) []point {
+	var ship []point
+	visited := make(map[point]struct{})
+	toVisit := []point{{x, y}}
+
+	neighbours := []point{
+		{0, 1},
+		{1, 0},
+		{0, -1},
+		{-1, 0},
+	}
+
+	for len(toVisit) > 0 {
+		var curr point
+		curr, toVisit = toVisit[0], toVisit[1:]
+		if board[curr.x][curr.y] == gui.Hit {
+			for _, offset := range neighbours {
+				n := point{curr.x + offset.x, curr.y + offset.y}
+				if _, ok := visited[n]; ok || n.x < 0 || n.x >= 10 || n.y < 0 || n.y >= 10 {
+					continue
+				}
+				toVisit = append(toVisit, n)
+			}
+			ship = append(ship, curr)
+		}
+
+		visited[curr] = struct{}{}
+	}
+
+	log.Debug("app [getShip]", "ship", ship)
+	return ship
 }

@@ -96,7 +96,7 @@ func (a *App) updateOppShots() {
 }
 
 func (a *App) getGamePayload(targetNick string) models.GamePayload {
-	log.Info("app [getGamePayload]", "targetNick", targetNick)
+	log.Debug("app [getGamePayload]", "targetNick", targetNick)
 	payload := models.GamePayload{
 		Nick: a.status.Nick,
 		Desc: a.status.Desc,
@@ -109,7 +109,7 @@ func (a *App) getGamePayload(targetNick string) models.GamePayload {
 	}
 
 	if a.customBoard {
-		log.Info("app [getGamePayload] - adding custom board")
+		log.Debug("app [getGamePayload] - adding custom board")
 		payload.Coords = getCoordsFromBoard(a.playerBoard)
 	}
 
@@ -131,6 +131,7 @@ func getCoordsFromBoard(board [10][10]gui.State) []string {
 }
 
 func (a *App) updateBoard() {
+	log.Debug("app [updateBoard]")
 	a.ui.board1.SetStates(a.playerBoard)
 	a.ui.board2.SetStates(a.opponentBoard)
 }
@@ -149,7 +150,7 @@ func (a *App) updateDescription() (err error) {
 	a.status.Desc = status.Desc
 	a.status.Opponent = status.Opponent
 	a.status.OppDesc = status.OppDesc
-	log.Info("app [updateDescription]", "status", a.status)
+	log.Debug("app [updateDescription]", "status", a.status)
 	return nil
 }
 
@@ -185,7 +186,7 @@ func (a *App) updateStatus() (err error) {
 	if err != nil {
 		return fmt.Errorf("client.GetStatus %w", err)
 	}
-	log.Info("app [updateStatus]", "status", status)
+	log.Debug("app [updateStatus]", "status", status)
 	a.status.ShouldFire = status.ShouldFire
 	a.status.GameStatus = status.GameStatus
 	a.status.OppShots = status.OppShots

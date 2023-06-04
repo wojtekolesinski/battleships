@@ -20,4 +20,4 @@
 - [x] Jako gracz, chcę mieć możliwość opuszczenia gry w trakcie rozgrywki, na wypadek gdybym nie chciał jej kontynuować.
 - [x] Jako gracz chcę widzieć swoje miejsce w rankingu, aby śledzić swoje wyniki
 - [ ] Jako gracz chcę wiedzieć informacje o stanie gry.
-- [ ] Jako gracz, chcę widzieć jakie statki przeciwnika pozostały jeszcze do zatopienia, abym mógł lepiej opracować strategię gry
+- [x] Jako gracz, chcę widzieć jakie statki przeciwnika pozostały jeszcze do zatopienia, abym mógł lepiej opracować strategię gry

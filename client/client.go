@@ -73,7 +73,7 @@ func (c *Client) InitGame(payload models.GamePayload) error {
 		return fmt.Errorf("client.newRequest: %w", err)
 	}
 
-	log.Info("client [InitGame]", "payload", payload)
+	log.Debug("client [InitGame]", "payload", payload)
 
 	res, err := c.Do(req)
 	if err != nil {
@@ -83,11 +83,10 @@ func (c *Client) InitGame(payload models.GamePayload) error {
 	log.Info("client [InitGame]", "statusCode", res.StatusCode)
 	err = checkStatus(res.StatusCode)
 	if err != nil {
-		log.Error("client [InitGame]", "client", fmt.Sprintf("%v", c))
 		return fmt.Errorf("checkStatus: %w", err)
 	}
 	c.token = res.Header.Get("X-Auth-Token")
-	log.Info("client [InitGame]", "token", c.token)
+	log.Debug("client [InitGame]", "token", c.token)
 	return nil
 }
 
@@ -115,7 +114,7 @@ func (c *Client) GetStatus() (models.StatusData, error) {
 		return models.StatusData{}, fmt.Errorf("client.getFromResponseBody: %w", err)
 	}
 
-	log.Info("client [GetStatus]", "status", data)
+	log.Debug("client [GetStatus]", "status", data)
 	return data, nil
 }
 
@@ -143,7 +142,7 @@ func (c *Client) GetBoard() (models.Board, error) {
 		return models.Board{}, fmt.Errorf("client.getFromResponseBody: %w", err)
 	}
 
-	log.Info("client [GetBoard]", "board", data.Board)
+	log.Debug("client [GetBoard]", "board", data.Board)
 	return data, nil
 }
 
@@ -170,7 +169,7 @@ func (c *Client) GetDescription() (models.StatusData, error) {
 	if err != nil {
 		return models.StatusData{}, fmt.Errorf("client.getFromResponseBody: %w", err)
 	}
-	log.Info("client [GetDescription]", "status", data)
+	log.Debug("client [GetDescription]", "status", data)
 	return data, nil
 }
 
@@ -188,7 +187,7 @@ func (c *Client) Fire(coord string) (models.FireAnswer, error) {
 		return models.FireAnswer{}, fmt.Errorf("client.newRequestWithToken: %w", err)
 	}
 
-	log.Info("client [Fire]", "payload", payload)
+	log.Debug("client [Fire]", "payload", payload)
 	res, err := c.Do(req)
 	if err != nil {
 		return models.FireAnswer{}, fmt.Errorf("client.Do: %w", err)
@@ -207,7 +206,7 @@ func (c *Client) Fire(coord string) (models.FireAnswer, error) {
 		return models.FireAnswer{}, fmt.Errorf("client.getFromResponseBody: %w", err)
 	}
 
-	log.Info("client [Fire]", "data", data)
+	log.Debug("client [Fire]", "data", data)
 	return data, nil
 }
 
@@ -235,7 +234,7 @@ func (c *Client) GetPlayersList() ([]models.ListData, error) {
 		return []models.ListData{}, fmt.Errorf("client.getFromResponseBody: %w", err)
 	}
 
-	log.Info("client [GetPlayersList]", "data", data)
+	log.Debug("client [GetPlayersList]", "data", data)
 	return data, nil
 }
 
@@ -283,7 +282,7 @@ func (c *Client) GetStats() (models.StatsList, error) {
 		return models.StatsList{}, fmt.Errorf("client.getFromResponseBody: %w", err)
 	}
 
-	log.Info("client [GetStats]", "data", data)
+	log.Debug("client [GetStats]", "data", data)
 	return data, nil
 }
 
@@ -311,7 +310,7 @@ func (c *Client) GetPlayerStats(nick string) (models.StatsNick, error) {
 		return models.StatsNick{}, fmt.Errorf("client.getFromResponseBody: %w", err)
 	}
 
-	log.Info("client [GetPlayerStats]", "data", data)
+	log.Debug("client [GetPlayerStats]", "data", data)
 	return data, nil
 }
 
