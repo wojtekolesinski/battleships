@@ -22,15 +22,28 @@ type ui struct {
 }
 
 var modelFleet = map[int]int{4: 1, 3: 2, 2: 3, 1: 4}
+var boardConfig = &gui.BoardConfig{
+	RulerColor: gui.White,
+	TextColor:  gui.Black,
+	EmptyColor: gui.NewColor(99, 161, 184),
+	HitColor:   gui.NewColor(230, 30, 22),
+	MissColor:  gui.Grey,
+	ShipColor:  gui.NewColor(91, 181, 22),
+	EmptyChar:  ' ',
+	HitChar:    ' ',
+	MissChar:   ' ',
+	ShipChar:   ' ',
+}
 
 func newGameUi() *ui {
 	textConfig := &gui.TextConfig{
 		FgColor: gui.White,
 		BgColor: gui.Black,
 	}
+
 	g := gui.NewGUI(false)
-	board1 := gui.NewBoard(2, 6, nil)
-	board2 := gui.NewBoard(60, 6, nil)
+	board1 := gui.NewBoard(2, 6, boardConfig)
+	board2 := gui.NewBoard(60, 6, boardConfig)
 	exitText := gui.NewText(2, 2, "Press Ctrl+C to exit", textConfig)
 	infoText := gui.NewText(2, 4, "", textConfig)
 	timer := gui.NewText(50, 15, " 60s ", &gui.TextConfig{
@@ -39,8 +52,18 @@ func newGameUi() *ui {
 	})
 	statsInfo := gui.NewText(50, 20, "0.00%", textConfig)
 
+	g.Draw(gui.NewText(2, 40, "Legend:", textConfig))
+	g.Draw(gui.NewText(2, 42, "   ", &gui.TextConfig{BgColor: boardConfig.ShipColor}))
+	g.Draw(gui.NewText(6, 42, "ship", textConfig))
+	g.Draw(gui.NewText(2, 44, "   ", &gui.TextConfig{BgColor: boardConfig.MissColor}))
+	g.Draw(gui.NewText(6, 44, "miss (no ship)", textConfig))
+	g.Draw(gui.NewText(2, 46, "   ", &gui.TextConfig{BgColor: boardConfig.HitColor}))
+	g.Draw(gui.NewText(6, 46, "hit", textConfig))
+	g.Draw(gui.NewText(2, 48, "   ", &gui.TextConfig{BgColor: boardConfig.EmptyColor}))
+	g.Draw(gui.NewText(6, 48, "empty", textConfig))
+
 	var fleetInfo []*gui.Text
-	fleetInfo = append(fleetInfo, gui.NewText(60, 40, "Opponents ships:", textConfig))
+	fleetInfo = append(fleetInfo, gui.NewText(60, 40, "Opponent's ships:", textConfig))
 	g.Draw(fleetInfo[0])
 	for i := 0; i < 4; i++ {
 		info := gui.NewText(60, 41+i,
@@ -76,8 +99,8 @@ func newFleetUi() *ui {
 		FgColor: gui.White,
 		BgColor: gui.Black,
 	}
-	g := gui.NewGUI(true)
-	board1 := gui.NewBoard(2, 6, nil)
+	g := gui.NewGUI(false)
+	board1 := gui.NewBoard(2, 6, boardConfig)
 	exitText := gui.NewText(2, 2, "Press Ctrl+C to exit", textConfig)
 	infoText := gui.NewText(2, 4, "", textConfig)
 	errorText := gui.NewText(2, 28, "", &gui.TextConfig{
