@@ -26,6 +26,7 @@ func main() {
 	defer w.Close()
 
 	log.SetOutput(w)
+	log.SetLevel(log.DebugLevel)
 	c := client.NewClient(serverAddress, httpClientTimeout)
 	a := app.New(c)
 
@@ -34,6 +35,6 @@ func main() {
 		log.Error("main [main]", "err", err)
 		fmt.Println("Something went wrong")
 	}
-	log.Info("main [main] ENDING GAME")
+	log.Info("main [main] - ENDING GAME")
 	fmt.Println("Thanks for playing")
 }

@@ -8,7 +8,6 @@ import (
 	gui "github.com/grupawp/warships-gui/v2"
 	"github.com/wojtekolesinski/battleships/client"
 	"github.com/wojtekolesinski/battleships/models"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -24,6 +23,7 @@ type App struct {
 	totalShots    int
 	hits          int
 	ui            *ui
+	customBoard   bool
 }
 
 func New(c *client.Client) *App {
@@ -115,46 +115,6 @@ func (a *App) loop(ctx context.Context, errChan chan error, cancelFunc context.C
 	}
 }
 
-func (a *App) updateStatus() (err error) {
-	var status models.StatusData
-	makeRequest(func() error {
-		status, err = a.client.GetStatus()
-		return err
-	})
-	if err != nil {
-		return fmt.Errorf("client.GetStatus %w", err)
-	}
-	log.Info("app [updateStatus]", "status", status)
-	a.status.ShouldFire = status.ShouldFire
-	a.status.GameStatus = status.GameStatus
-	a.status.OppShots = status.OppShots
-	a.status.LastGameStatus = status.LastGameStatus
-	a.status.Timer = status.Timer
-	return
-}
-
-func (a *App) updateDescription() (err error) {
-	var status models.StatusData
-	makeRequest(func() error {
-		status, err = a.client.GetDescription()
-		return err
-	})
-	if err != nil {
-		return fmt.Errorf("client.GetDescription: %w", err)
-	}
-	log.SetDefault(log.Default().With("nick", status.Nick))
-	a.status.Nick = status.Nick
-	a.status.Desc = status.Desc
-	a.status.Opponent = status.Opponent
-	a.status.OppDesc = status.OppDesc
-	log.Info("app [updateDescription]", "status", a.status)
-	return nil
-}
-
-func (a *App) gameInProgress() bool {
-	return a.status.GameStatus == "game_in_progress"
-}
-
 func (a *App) waitForYourTurn() error {
 	log.Info("app [waitForYourTurn] - starting to wait")
 	a.ui.setInfoText("Opponent's turn")
@@ -174,48 +134,6 @@ func (a *App) waitForYourTurn() error {
 		}
 	}
 	log.Info("app [waitForYourTurn]", "opp shots", strings.Join(a.status.OppShots, " "), "shouldFire", a.status.ShouldFire)
-	return nil
-}
-
-func (a *App) updateOppShots() {
-	for _, coord := range a.status.OppShots {
-		x, y, _ := parseCoords(coord)
-
-		if a.playerBoard[x][y] == gui.Ship {
-			a.playerBoard[x][y] = gui.Hit
-		} else if a.playerBoard[x][y] == gui.Empty {
-			a.playerBoard[x][y] = gui.Miss
-		}
-	}
-}
-
-func (a *App) getAccuracy() float32 {
-	if a.totalShots == 0 {
-		return 0
-	}
-	return 100 * float32(a.hits) / float32(a.totalShots)
-}
-
-func (a *App) parseBoard(b models.Board) error {
-	a.playerBoard = [10][10]gui.State{}
-	a.opponentBoard = [10][10]gui.State{}
-	for i := range a.playerBoard {
-		a.playerBoard[i] = [10]gui.State{}
-		a.opponentBoard[i] = [10]gui.State{}
-
-		for j := range a.playerBoard[i] {
-			a.playerBoard[i][j] = gui.Empty
-			a.opponentBoard[i][j] = gui.Empty
-		}
-	}
-
-	for _, coords := range b.Board {
-		x, y, err := parseCoords(coords)
-		if err != nil {
-			return fmt.Errorf("parseCoords: %w", err)
-		}
-		a.playerBoard[x][y] = gui.Ship
-	}
 	return nil
 }
 
@@ -254,57 +172,6 @@ func (a *App) handleShot(ctx context.Context) (string, error) {
 		log.Info("app [handleShot]", "wrong_coord", coords, "value", a.opponentBoard[x][y])
 		a.ui.setInfoText("Choose again!")
 	}
-}
-
-func (a *App) getOpponent() (targetNick string, err error) {
-	var players []models.ListData
-	fmt.Println("Fetching list of active players")
-	makeRequest(func() error {
-		players, err = a.client.GetPlayersList()
-		return err
-	})
-	if err != nil {
-		err = fmt.Errorf("client.GetPlayersList: %w", err)
-		return
-	}
-
-	players = append([]models.ListData{{Nick: "wp_bot"}}, players...)
-
-	choice := promptList(players, 0, func(a models.ListData) string { return a.Nick })
-
-	return players[choice].Nick, nil
-}
-
-func (a *App) getNameAndDescription() {
-	var name, desc string
-	for {
-		fmt.Print("Insert your name (leave blank to get one assigned): ")
-		_, err := fmt.Scanln(&name)
-		if err == nil || err.Error() == "unexpected newline" {
-			break
-		} else {
-			log.Error("app [getNameAndDescripiton]", "err", err, "name", name)
-		}
-
-	}
-
-	for {
-		fmt.Print("Insert your description (leave blank to get one assigned): ")
-		_, err := fmt.Scanln(&desc)
-		if err == nil || err.Error() == "unexpected newline" {
-			break
-		} else {
-			log.Error("app [getNameAndDescripiton]", "err", err, "desc", desc)
-		}
-
-	}
-	a.status.Nick = name
-	a.status.Desc = desc
-}
-
-func (a *App) updateBoard() {
-	a.ui.board1.SetStates(a.playerBoard)
-	a.ui.board2.SetStates(a.opponentBoard)
 }
 
 func (a *App) shoot(ctx context.Context) error {
@@ -353,116 +220,6 @@ func (a *App) shoot(ctx context.Context) error {
 		}
 	}
 	return nil
-}
-
-func (a *App) displayMenu() (models.GamePayload, error) {
-	choices := []string{
-		"Join a game",
-		"Wait for an opponent",
-		"Display top 10 stats",
-		"Display your stats",
-	}
-
-	choice := promptList(choices, 1, func(a string) string { return a })
-	log.Info("app [displayMenu]", "choice", choice)
-
-	switch choice {
-	case 1:
-		targetNick, err := a.getOpponent()
-		if err != nil {
-			return models.GamePayload{}, fmt.Errorf("app.getOpponent: %w", err)
-		}
-		return a.getGamePayload(targetNick), nil
-	case 2:
-		fmt.Println("Waiting for an invitation...")
-		return a.getGamePayload(""), nil
-	case 3:
-		err := a.displayTop10Stats()
-		if err != nil {
-			return models.GamePayload{}, fmt.Errorf("app.displayTop10Stats: %w", err)
-		}
-	case 4:
-		err := a.displayPlayerStats()
-		if err != nil {
-			return models.GamePayload{}, fmt.Errorf("app.displayPlayerStats: %w", err)
-		}
-	}
-	return a.displayMenu()
-}
-
-func (a *App) playGame() {
-
-}
-
-func (a *App) displayTop10Stats() error {
-	var stats models.StatsList
-	var err error
-	makeRequest(func() error {
-		stats, err = a.client.GetStats()
-		return err
-	})
-	if err != nil {
-		return fmt.Errorf("client.GetStats: %w", err)
-	}
-
-	fmt.Println()
-	fmt.Printf("| %4s | %-20s | %-5s | %4s | %6s |\n", "RANK", "NICK", "Games", "Wins", "Points")
-	for _, s := range stats.Stats {
-		fmt.Printf("| %4s | %-20s | %5s | %4s | %6s |\n",
-			strconv.Itoa(s.Rank),
-			s.Nick,
-			strconv.Itoa(s.Games),
-			strconv.Itoa(s.Wins),
-			strconv.Itoa(s.Points),
-		)
-	}
-	fmt.Println()
-	return nil
-}
-
-func (a *App) displayPlayerStats() error {
-	var stats models.StatsNick
-	var err error
-	makeRequest(func() error {
-		stats, err = a.client.GetPlayerStats(a.status.Nick)
-		return err
-	})
-	if err != nil {
-		if errors.Is(err, client.ErrNotFound) {
-			fmt.Println("\nNo stats for player\n")
-			return nil
-		}
-		return fmt.Errorf("client.GetPlayerStats: %w", err)
-	}
-
-	fmt.Println()
-	fmt.Printf("| %4s | %-20s | %-5s | %4s | %6s |\n", "RANK", "NICK", "Games", "Wins", "Points")
-	s := stats.Stats
-	fmt.Printf("| %4s | %-20s | %5s | %4s | %6s |\n",
-		strconv.Itoa(s.Rank),
-		s.Nick,
-		strconv.Itoa(s.Games),
-		strconv.Itoa(s.Wins),
-		strconv.Itoa(s.Points),
-	)
-
-	fmt.Println()
-	return nil
-}
-
-func (a *App) getGamePayload(targetNick string) models.GamePayload {
-	log.Info("app [getGamePayload]", "targetNick", targetNick)
-	payload := models.GamePayload{
-		Nick: a.status.Nick,
-		Desc: a.status.Desc,
-	}
-
-	if targetNick == "wp_bot" {
-		payload.Wpbot = true
-	} else {
-		payload.TargetNick = targetNick
-	}
-	return payload
 }
 
 func (a *App) initGame(payload models.GamePayload) error {
@@ -530,8 +287,160 @@ func (a *App) initGame(payload models.GamePayload) error {
 		return fmt.Errorf("parseBoard: %w", err)
 	}
 	log.Info("app [initGame] - initializing gui")
-	a.ui = newUi()
+	a.ui = newGameUi()
 	a.ui.renderDescriptions(a.status.Desc, a.status.OppDesc)
 	a.updateBoard()
 	return nil
+}
+
+type point struct {
+	x, y int
+}
+
+func (a *App) editBoard() error {
+	fleet := map[int]int{4: 1, 3: 2, 2: 3, 1: 4}
+
+	ui := newFleetUi()
+	board := [10][10]gui.State{}
+	for i := range board {
+		board[i] = [10]gui.State{}
+		for j := range board[i] {
+			board[i][j] = gui.Hit
+		}
+	}
+	ui.board1.SetStates(board)
+	ctx, cancelFunc := context.WithCancel(context.Background())
+	defer cancelFunc()
+
+	go func() {
+		for length := 4; length >= 1; length-- {
+			count := fleet[length]
+			for s := 0; s < count; s++ {
+				ship := []point{}
+				ui.setInfoText(fmt.Sprintf("Placing ship with length: %d (%d/%d)", length, s+1, count))
+
+				for i := range board {
+					for j := range board[i] {
+						if board[i][j] == gui.Empty {
+							board[i][j] = gui.Hit
+						}
+					}
+				}
+				ui.board1.SetStates(board)
+
+				for j := 0; j < length; j++ {
+					ui.resetErrorText()
+					for {
+						coords := ui.board1.Listen(context.TODO())
+						x, y, err := parseCoords(coords)
+						if err != nil {
+							log.Error(fmt.Errorf("parseCoords: %w", err))
+						}
+
+						if board[x][y] == gui.Hit {
+							ship = append(ship, point{x, y})
+							board[x][y] = gui.Ship
+							setPossiblePositions(&board, ship)
+							log.Info("app [editBoard]", "board", board)
+							ui.board1.SetStates(board)
+							break
+						}
+						ui.setErrorText("Invalid choice")
+					}
+				}
+
+				setImpossiblePositions(&board, ship)
+				ui.board1.SetStates(board)
+			}
+		}
+
+		for i := range board {
+			for j := range board[i] {
+				if board[i][j] != gui.Ship {
+					board[i][j] = gui.Empty
+				}
+			}
+		}
+		a.customBoard = true
+		a.playerBoard = board
+		log.Debug("app [editBoard]", "coords", getCoordsFromBoard(board))
+	}()
+
+	ui.gui.Start(ctx, nil)
+
+	return nil
+}
+
+func setPossiblePositions(board *[10][10]gui.State, ship []point) {
+	for i := range board {
+		for j := range board[i] {
+			if board[i][j] == gui.Hit {
+				board[i][j] = gui.Empty
+			}
+		}
+	}
+
+	neighbours := []point{
+		{0, 1},
+		{1, 0},
+		{0, -1},
+		{-1, 0},
+	}
+
+	for _, p := range ship {
+		log.Info("app [setPossiblePositions]", "ship", p)
+		for _, offset := range neighbours {
+			n := point{p.x + offset.x, p.y + offset.y}
+			if n.x < 0 || n.x >= 10 || n.y < 0 || n.y >= 10 {
+				continue
+			}
+
+			log.Info("app [setPossiblePositions]", "neighbour", n)
+
+			if board[n.x][n.y] == gui.Empty {
+				board[n.x][n.y] = gui.Hit
+			}
+		}
+	}
+
+	log.Info("app [setPossiblePositions]", "board", board)
+}
+
+func setImpossiblePositions(board *[10][10]gui.State, ship []point) {
+	for i := range board {
+		for j := range board[i] {
+			if board[i][j] == gui.Hit {
+				board[i][j] = gui.Empty
+			}
+		}
+	}
+
+	neighbours := []point{
+		{0, 1},
+		{1, 1},
+		{1, 0},
+		{1, -1},
+		{0, -1},
+		{-1, -1},
+		{-1, 0},
+		{-1, 1},
+	}
+
+	for _, p := range ship {
+		log.Info("app [setImpossiblePositions]", "ship", p)
+		for _, offset := range neighbours {
+			n := point{p.x + offset.x, p.y + offset.y}
+			if n.x < 0 || n.x >= 10 || n.y < 0 || n.y >= 10 {
+				continue
+			}
+
+			log.Info("app [setImpossiblePositions]", "neighbour", n)
+
+			if board[n.x][n.y] == gui.Empty {
+				board[n.x][n.y] = gui.Miss
+			}
+		}
+	}
+
+	log.Info("app [setImpossiblePositions]", "board", board)
 }

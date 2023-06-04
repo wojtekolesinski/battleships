@@ -13,13 +13,14 @@ type ui struct {
 	board1    *gui.Board
 	board2    *gui.Board
 	infoText  *gui.Text
+	errorText *gui.Text
 	exitText  *gui.Text
 	timer     *gui.Text
 	statsInfo *gui.Text
 }
 
-func newUi() *ui {
-	g := gui.NewGUI(true)
+func newGameUi() *ui {
+	g := gui.NewGUI(false)
 	board1 := gui.NewBoard(2, 6, nil)
 	board2 := gui.NewBoard(60, 6, nil)
 	exitText := gui.NewText(2, 2, "Press Ctrl+C to exit", nil)
@@ -49,6 +50,34 @@ func newUi() *ui {
 	}
 }
 
+func newFleetUi() *ui {
+	textConfig := &gui.TextConfig{
+		FgColor: gui.White,
+		BgColor: gui.Black,
+	}
+	g := gui.NewGUI(true)
+	board1 := gui.NewBoard(2, 6, nil)
+	exitText := gui.NewText(2, 2, "Press Ctrl+C to exit", textConfig)
+	infoText := gui.NewText(2, 4, "", textConfig)
+	errorText := gui.NewText(2, 28, "", &gui.TextConfig{
+		FgColor: gui.Red,
+		BgColor: gui.Black,
+	})
+
+	g.Draw(board1)
+	g.Draw(exitText)
+	g.Draw(infoText)
+	g.Draw(errorText)
+
+	return &ui{
+		gui:       g,
+		board1:    board1,
+		infoText:  infoText,
+		exitText:  exitText,
+		errorText: errorText,
+	}
+}
+
 func (u *ui) renderDescriptions(playerDesc, oppDesc string) {
 	log.Info("app [renderDescriptions]", "playerDesc", playerDesc, "oppDesc", oppDesc)
 	fragments := strings.Split(wordwrap.WrapString(playerDesc, 40), "\n")
@@ -68,6 +97,14 @@ func (u *ui) setInfoText(text string) {
 
 func (u *ui) setExitText(text string) {
 	u.exitText.SetText(text)
+}
+
+func (u *ui) setErrorText(text string) {
+	u.errorText.SetText(text)
+}
+
+func (u *ui) resetErrorText() {
+	u.errorText.SetText("")
 }
 
 func (u *ui) renderGameResult(result string) {

@@ -16,8 +16,8 @@
 - [x] Jako użytkownik chcę móc podać swój pseudonim, aby inni użytkownicy mogli zaprosić mnie do rozgrywki.
 - [x] Jako użytkownik chcę zobaczyć listę dostępnych graczy i wybrać przeciwnika.
 - [x] Jako użytkownik chcę widzieć ile czasu zostało mi do wykonania ruchu, abym nie został wyrzucony z gry.
-- [ ] Jako użytkownik, chcę móc ustawić samodzielnie statki na planszy, abym mógł opracować swoją strategię gry.
-- [ ] Jako gracz, chcę mieć możliwość opuszczenia gry w trakcie rozgrywki, na wypadek gdybym nie chciał jej kontynuować.
+- [x] Jako użytkownik, chcę móc ustawić samodzielnie statki na planszy, abym mógł opracować swoją strategię gry.
+- [x] Jako gracz, chcę mieć możliwość opuszczenia gry w trakcie rozgrywki, na wypadek gdybym nie chciał jej kontynuować.
 - [x] Jako gracz chcę widzieć swoje miejsce w rankingu, aby śledzić swoje wyniki
 - [ ] Jako gracz chcę wiedzieć informacje o stanie gry.
 - [ ] Jako gracz, chcę widzieć jakie statki przeciwnika pozostały jeszcze do zatopienia, abym mógł lepiej opracować strategię gry
