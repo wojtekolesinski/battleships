@@ -15,6 +15,22 @@ const (
 )
 
 func main() {
+	//var board app.Board
+	//for i := range board {
+	//	var row [10]gui.State
+	//	for j := range row {
+	//		row[j] = gui.Empty
+	//	}
+	//	board[i] = row
+	//}
+	//
+	//state := app.NewGenState()
+	//probs := app.GenerateBoards2(board, state)
+	//for i := range probs {
+	//	fmt.Println(probs[i])
+	//}
+	//os.Exit(0)
+
 	logPath := fmt.Sprintf("log/%s.log", time.Now().Format("02-01-2006"))
 	if len(os.Args) > 1 {
 		logPath = os.Args[1]

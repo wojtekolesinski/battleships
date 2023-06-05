@@ -9,43 +9,48 @@ import (
 )
 
 type ui struct {
-	gui               *gui.GUI
-	board1            *gui.Board
-	board2            *gui.Board
-	infoText          *gui.Text
-	errorText         *gui.Text
-	exitText          *gui.Text
-	timer             *gui.Text
-	statsInfo         *gui.Text
-	defaultTextConfig *gui.TextConfig
-	fleetInfo         []*gui.Text
+	gui       *gui.GUI
+	board1    *gui.Board
+	board2    *gui.Board
+	infoText  *gui.Text
+	errorText *gui.Text
+	exitText  *gui.Text
+	timer     *gui.Text
+	statsInfo *gui.Text
+	fleetInfo []*gui.Text
 }
 
-var modelFleet = map[int]int{4: 1, 3: 2, 2: 3, 1: 4}
-var boardConfig = &gui.BoardConfig{
-	RulerColor: gui.White,
-	TextColor:  gui.Black,
-	EmptyColor: gui.NewColor(99, 161, 184),
-	HitColor:   gui.NewColor(230, 30, 22),
-	MissColor:  gui.Grey,
-	ShipColor:  gui.NewColor(91, 181, 22),
-	EmptyChar:  ' ',
-	HitChar:    ' ',
-	MissChar:   ' ',
-	ShipChar:   ' ',
-}
-
-func newGameUi() *ui {
-	textConfig := &gui.TextConfig{
+var (
+	modelFleet  = map[int]int{4: 1, 3: 2, 2: 3, 1: 4}
+	boardConfig = &gui.BoardConfig{
+		RulerColor: gui.White,
+		TextColor:  gui.Black,
+		EmptyColor: gui.NewColor(99, 161, 184),
+		HitColor:   gui.NewColor(230, 30, 22),
+		MissColor:  gui.Grey,
+		ShipColor:  gui.NewColor(91, 181, 22),
+		EmptyChar:  ' ',
+		HitChar:    ' ',
+		MissChar:   ' ',
+		ShipChar:   ' ',
+	}
+	textConfig = &gui.TextConfig{
 		FgColor: gui.White,
 		BgColor: gui.Black,
 	}
+	errorConfig = &gui.TextConfig{
+		FgColor: gui.Red,
+		BgColor: gui.Black,
+	}
+)
 
+func newGameUi() *ui {
 	g := gui.NewGUI(false)
 	board1 := gui.NewBoard(2, 6, boardConfig)
 	board2 := gui.NewBoard(60, 6, boardConfig)
 	exitText := gui.NewText(2, 2, "Press Ctrl+C to exit", textConfig)
 	infoText := gui.NewText(2, 4, "", textConfig)
+	errorText := gui.NewText(60, 2, "", errorConfig)
 	timer := gui.NewText(50, 15, " 60s ", &gui.TextConfig{
 		FgColor: gui.NewColor(10, 10, 10),
 		BgColor: gui.NewColor(255, 0, 255),
@@ -55,12 +60,12 @@ func newGameUi() *ui {
 	g.Draw(gui.NewText(2, 40, "Legend:", textConfig))
 	g.Draw(gui.NewText(2, 42, "   ", &gui.TextConfig{BgColor: boardConfig.ShipColor}))
 	g.Draw(gui.NewText(6, 42, "ship", textConfig))
-	g.Draw(gui.NewText(2, 44, "   ", &gui.TextConfig{BgColor: boardConfig.MissColor}))
-	g.Draw(gui.NewText(6, 44, "miss (no ship)", textConfig))
-	g.Draw(gui.NewText(2, 46, "   ", &gui.TextConfig{BgColor: boardConfig.HitColor}))
-	g.Draw(gui.NewText(6, 46, "hit", textConfig))
-	g.Draw(gui.NewText(2, 48, "   ", &gui.TextConfig{BgColor: boardConfig.EmptyColor}))
-	g.Draw(gui.NewText(6, 48, "empty", textConfig))
+	g.Draw(gui.NewText(2, 43, "   ", &gui.TextConfig{BgColor: boardConfig.MissColor}))
+	g.Draw(gui.NewText(6, 43, "miss (no ship)", textConfig))
+	g.Draw(gui.NewText(2, 44, "   ", &gui.TextConfig{BgColor: boardConfig.HitColor}))
+	g.Draw(gui.NewText(6, 44, "hit", textConfig))
+	g.Draw(gui.NewText(2, 45, "   ", &gui.TextConfig{BgColor: boardConfig.EmptyColor}))
+	g.Draw(gui.NewText(6, 45, "empty", textConfig))
 
 	var fleetInfo []*gui.Text
 	fleetInfo = append(fleetInfo, gui.NewText(60, 40, "Opponent's ships:", textConfig))
@@ -77,36 +82,30 @@ func newGameUi() *ui {
 	g.Draw(board2)
 	g.Draw(exitText)
 	g.Draw(infoText)
+	g.Draw(errorText)
 	g.Draw(timer)
 	g.Draw(statsInfo)
 	g.Draw(gui.NewText(48, 19, "Accuracy:", nil))
 
 	return &ui{
-		gui:               g,
-		board1:            board1,
-		board2:            board2,
-		infoText:          infoText,
-		exitText:          exitText,
-		timer:             timer,
-		statsInfo:         statsInfo,
-		defaultTextConfig: textConfig,
-		fleetInfo:         fleetInfo,
+		gui:       g,
+		board1:    board1,
+		board2:    board2,
+		infoText:  infoText,
+		exitText:  exitText,
+		timer:     timer,
+		statsInfo: statsInfo,
+		fleetInfo: fleetInfo,
+		errorText: errorText,
 	}
 }
 
 func newFleetUi() *ui {
-	textConfig := &gui.TextConfig{
-		FgColor: gui.White,
-		BgColor: gui.Black,
-	}
 	g := gui.NewGUI(false)
 	board1 := gui.NewBoard(2, 6, boardConfig)
 	exitText := gui.NewText(2, 2, "Press Ctrl+C to exit", textConfig)
 	infoText := gui.NewText(2, 4, "", textConfig)
-	errorText := gui.NewText(2, 28, "", &gui.TextConfig{
-		FgColor: gui.Red,
-		BgColor: gui.Black,
-	})
+	errorText := gui.NewText(2, 28, "", errorConfig)
 
 	g.Draw(board1)
 	g.Draw(exitText)
@@ -114,31 +113,30 @@ func newFleetUi() *ui {
 	g.Draw(errorText)
 
 	return &ui{
-		gui:               g,
-		board1:            board1,
-		infoText:          infoText,
-		exitText:          exitText,
-		errorText:         errorText,
-		defaultTextConfig: textConfig,
+		gui:       g,
+		board1:    board1,
+		infoText:  infoText,
+		exitText:  exitText,
+		errorText: errorText,
 	}
 }
 
 func (u *ui) renderNicks(playerNick, oppNick string) {
 	log.Debug("app [renderNicks]", "playerNick", playerNick, "oppNick", oppNick)
-	u.gui.Draw(gui.NewText(2, 28, playerNick, u.defaultTextConfig))
-	u.gui.Draw(gui.NewText(60, 28, oppNick, u.defaultTextConfig))
+	u.gui.Draw(gui.NewText(2, 28, playerNick, textConfig))
+	u.gui.Draw(gui.NewText(60, 28, oppNick, textConfig))
 }
 
 func (u *ui) renderDescriptions(playerDesc, oppDesc string) {
 	log.Debug("app [renderDescriptions]", "playerDesc", playerDesc, "oppDesc", oppDesc)
 	fragments := strings.Split(wordwrap.WrapString(playerDesc, 40), "\n")
 	for i, f := range fragments {
-		u.gui.Draw(gui.NewText(2, 30+i, f, u.defaultTextConfig))
+		u.gui.Draw(gui.NewText(2, 30+i, f, textConfig))
 	}
 
 	fragments = strings.Split(wordwrap.WrapString(oppDesc, 40), "\n")
 	for i, f := range fragments {
-		u.gui.Draw(gui.NewText(60, 30+i, f, u.defaultTextConfig))
+		u.gui.Draw(gui.NewText(60, 30+i, f, textConfig))
 	}
 }
 

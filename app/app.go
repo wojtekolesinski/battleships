@@ -168,20 +168,20 @@ func (a *App) handleShot(ctx context.Context) (string, error) {
 	a.ui.setInfoText("Choose your target:")
 	for {
 		coords := a.ui.board2.Listen(context.TODO())
-		a.ui.setInfoText(fmt.Sprintf("Coordinate: %s", coords))
 		x, y, err := parseCoords(coords)
 		if err != nil {
 			return "", fmt.Errorf("parseCoords: %w", err)
 		}
 
 		if a.opponentBoard[x][y] == gui.Empty {
+			a.ui.resetErrorText()
 			log.Debug("app [handleShot]", "correct_coord", coords, "value", a.opponentBoard[x][y])
 			cancel()
 			return coords, nil
 		}
 
 		log.Warn("app [handleShot]", "wrong_coord", coords, "value", a.opponentBoard[x][y])
-		a.ui.setInfoText("Choose again!")
+		a.ui.setErrorText("Choose again!")
 	}
 }
 
@@ -212,14 +212,11 @@ func (a *App) shoot(ctx context.Context) error {
 		switch answer.Result {
 		case "hit":
 			a.opponentBoard[x][y] = gui.Hit
-			a.ui.setInfoText("HIT")
 			a.hits++
 		case "miss":
 			a.opponentBoard[x][y] = gui.Miss
-			a.ui.setInfoText("MISS")
 		case "sunk":
 			a.opponentBoard[x][y] = gui.Hit
-			a.ui.setInfoText("SUNK")
 			a.handleSunk(x, y)
 			a.hits++
 		}
@@ -367,7 +364,7 @@ func (a *App) editBoard() error {
 				}
 
 				clearHits(&board)
-				setImpossiblePositions(&board, ship)
+				board = setImpossiblePositions(board, ship)
 				ui.board1.SetStates(board)
 				getShip(board, ship[0].x, ship[0].y)
 			}
@@ -393,9 +390,14 @@ func (a *App) editBoard() error {
 func (a *App) handleSunk(x, y int) {
 	log.Debug("app [handleSunk]", "x", x, "y", y)
 	ship := getShip(a.opponentBoard, x, y)
-	setImpossiblePositions(&a.opponentBoard, ship)
+	a.opponentBoard = setImpossiblePositions(a.opponentBoard, ship)
 	a.oppFleet[len(ship)]--
 	a.ui.setFleetInfo(a.oppFleet)
+
+	probs := GenerateBoards2(a.opponentBoard, genState{shipsLeft: a.oppFleet})
+	for i := range probs {
+		log.Debug("app [handleSunk]", "probs", probs[i])
+	}
 }
 
 func (a *App) reset() {
@@ -441,7 +443,7 @@ func setPossiblePositions(board *[10][10]gui.State, ship []point) {
 	log.Debug("app [setPossiblePositions]", "board", board)
 }
 
-func setImpossiblePositions(board *[10][10]gui.State, ship []point) {
+func setImpossiblePositions(board Board, ship []point) Board {
 	neighbours := []point{
 		{0, 1},
 		{1, 1},
@@ -470,6 +472,7 @@ func setImpossiblePositions(board *[10][10]gui.State, ship []point) {
 	}
 
 	log.Debug("app [setImpossiblePositions]", "board", board)
+	return board
 }
 
 func getShip(board [10][10]gui.State, x, y int) []point {
