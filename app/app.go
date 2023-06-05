@@ -17,14 +17,17 @@ var maxRequests = 3
 
 type App struct {
 	client        *client.Client
-	playerBoard   [10][10]gui.State
-	opponentBoard [10][10]gui.State
+	playerBoard   Board
+	opponentBoard Board
 	status        models.StatusData
 	totalShots    int
 	hits          int
 	ui            *ui
 	customBoard   bool
 	oppFleet      map[int]int
+	bot           *bot
+	useAssistant  bool
+	useBot        bool
 }
 
 func New(c *client.Client) *App {
@@ -40,6 +43,11 @@ func (a *App) Run() error {
 		gamePayload, err := a.displayMenu()
 		if err != nil {
 			return fmt.Errorf("app.displayMenu: %w", err)
+		}
+
+		a.useBot = promptPlayer("Do you want a bot to play for you?")
+		if !a.useBot {
+			a.useAssistant = promptPlayer("Do you want to play with an assistant?")
 		}
 
 		err = a.initGame(gamePayload)
@@ -90,6 +98,7 @@ func (a *App) loop(ctx context.Context, errChan chan error, cancelFunc context.C
 	log.Info("app [Run] - starting gameloop", "status", a.status)
 	defer cancelFunc()
 	for a.gameInProgress() {
+
 		err := a.waitForYourTurn()
 		if err != nil {
 			if errors.Is(err, ErrorGameEnded) {
@@ -144,6 +153,7 @@ func (a *App) waitForYourTurn() error {
 
 	a.updateOppShots()
 	a.updateBoard()
+	a.ui.setInfoText("Your turn")
 	log.Debug("app [waitForYourTurn]", "opp shots", strings.Join(a.status.OppShots, " "), "shouldFire", a.status.ShouldFire)
 	return nil
 }
@@ -165,7 +175,16 @@ func (a *App) handleShot(ctx context.Context) (string, error) {
 			}
 		}
 	}()
+	rec := a.bot.getRecommendation(a.opponentBoard, a.oppFleet)
+	if a.useBot {
+		return fmt.Sprintf("%c%d", rec.x+'A', rec.y+1), nil
+	}
+
 	a.ui.setInfoText("Choose your target:")
+	if a.useAssistant {
+		a.opponentBoard[rec.x][rec.y] = gui.Ship
+		a.updateBoard()
+	}
 	for {
 		coords := a.ui.board2.Listen(context.TODO())
 		x, y, err := parseCoords(coords)
@@ -173,10 +192,14 @@ func (a *App) handleShot(ctx context.Context) (string, error) {
 			return "", fmt.Errorf("parseCoords: %w", err)
 		}
 
-		if a.opponentBoard[x][y] == gui.Empty {
+		if a.opponentBoard[x][y] == gui.Empty || a.opponentBoard[x][y] == gui.Ship {
 			a.ui.resetErrorText()
 			log.Debug("app [handleShot]", "correct_coord", coords, "value", a.opponentBoard[x][y])
 			cancel()
+			if a.opponentBoard[rec.x][rec.y] == gui.Ship {
+				a.opponentBoard[rec.x][rec.y] = gui.Empty
+				a.updateBoard()
+			}
 			return coords, nil
 		}
 
@@ -212,6 +235,7 @@ func (a *App) shoot(ctx context.Context) error {
 		switch answer.Result {
 		case "hit":
 			a.opponentBoard[x][y] = gui.Hit
+			a.bot.hit(a.opponentBoard, x, y)
 			a.hits++
 		case "miss":
 			a.opponentBoard[x][y] = gui.Miss
@@ -366,7 +390,7 @@ func (a *App) editBoard() error {
 				clearHits(&board)
 				board = setImpossiblePositions(board, ship)
 				ui.board1.SetStates(board)
-				getShip(board, ship[0].x, ship[0].y)
+				ui.setExitText("Press Ctrl+C to save and exit")
 			}
 		}
 
@@ -393,17 +417,14 @@ func (a *App) handleSunk(x, y int) {
 	a.opponentBoard = setImpossiblePositions(a.opponentBoard, ship)
 	a.oppFleet[len(ship)]--
 	a.ui.setFleetInfo(a.oppFleet)
-
-	probs := GenerateBoards2(a.opponentBoard, genState{shipsLeft: a.oppFleet})
-	for i := range probs {
-		log.Debug("app [handleSunk]", "probs", probs[i])
-	}
+	a.bot.sunk()
 }
 
 func (a *App) reset() {
 	a.oppFleet = map[int]int{4: 1, 3: 2, 2: 3, 1: 4}
 	a.hits = 0
 	a.totalShots = 0
+	a.bot = newBot()
 }
 
 func clearHits(board *[10][10]gui.State) {

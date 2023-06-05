@@ -103,7 +103,7 @@ func newGameUi() *ui {
 func newFleetUi() *ui {
 	g := gui.NewGUI(false)
 	board1 := gui.NewBoard(2, 6, boardConfig)
-	exitText := gui.NewText(2, 2, "Press Ctrl+C to exit", textConfig)
+	exitText := gui.NewText(2, 2, "Press Ctrl+C to exit without saving", textConfig)
 	infoText := gui.NewText(2, 4, "", textConfig)
 	errorText := gui.NewText(2, 28, "", errorConfig)
 

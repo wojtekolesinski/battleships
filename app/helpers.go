@@ -19,12 +19,12 @@ func promptList[T any](list []T, start int, mapper func(T) string) int {
 		fmt.Print("Your choice: ")
 		_, err := fmt.Scanf("%s", &res)
 		if err != nil {
-			fmt.Printf("Try again 1 %s\n", err)
+			fmt.Println("Try again")
 			continue
 		}
 		choice, err = strconv.Atoi(res)
 		if err != nil {
-			fmt.Printf("Try again 2 %s\n", err)
+			fmt.Println("Try again")
 			continue
 		}
 
