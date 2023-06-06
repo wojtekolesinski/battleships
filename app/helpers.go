@@ -108,9 +108,9 @@ func (a *App) getGamePayload(targetNick string) models.GamePayload {
 		payload.TargetNick = targetNick
 	}
 
-	if a.customBoard {
+	if len(a.customBoard) > 0 {
 		log.Debug("app [getGamePayload] - adding custom board")
-		payload.Coords = getCoordsFromBoard(a.playerBoard)
+		payload.Coords = a.customBoard
 	}
 
 	return payload

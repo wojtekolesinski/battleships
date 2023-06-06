@@ -34,12 +34,24 @@ var (
 		MissChar:   ' ',
 		ShipChar:   ' ',
 	}
+	oppBoardConfig = &gui.BoardConfig{
+		RulerColor: gui.White,
+		TextColor:  gui.Black,
+		EmptyColor: gui.NewColor(99, 161, 184),
+		HitColor:   gui.NewColor(230, 30, 22),
+		MissColor:  gui.Grey,
+		ShipColor:  gui.Green,
+		EmptyChar:  ' ',
+		HitChar:    ' ',
+		MissChar:   ' ',
+		ShipChar:   ' ',
+	}
 	textConfig = &gui.TextConfig{
 		FgColor: gui.White,
 		BgColor: gui.Black,
 	}
 	errorConfig = &gui.TextConfig{
-		FgColor: gui.Red,
+		FgColor: gui.NewColor(240, 0, 0),
 		BgColor: gui.Black,
 	}
 )
@@ -47,7 +59,7 @@ var (
 func newGameUi() *ui {
 	g := gui.NewGUI(false)
 	board1 := gui.NewBoard(2, 6, boardConfig)
-	board2 := gui.NewBoard(60, 6, boardConfig)
+	board2 := gui.NewBoard(60, 6, oppBoardConfig)
 	exitText := gui.NewText(2, 2, "Press Ctrl+C to exit", textConfig)
 	infoText := gui.NewText(2, 4, "", textConfig)
 	errorText := gui.NewText(60, 2, "", errorConfig)
@@ -189,4 +201,9 @@ func (u *ui) updateTime(time int) {
 
 func (u *ui) updateAccuracy(accuracy float32) {
 	u.statsInfo.SetText(fmt.Sprintf("%.2f%%", accuracy))
+}
+
+func (u *ui) addAssistantInfo() {
+	u.gui.Draw(gui.NewText(2, 46, "   ", &gui.TextConfig{BgColor: oppBoardConfig.ShipColor}))
+	u.gui.Draw(gui.NewText(6, 46, "assistant's pick", textConfig))
 }

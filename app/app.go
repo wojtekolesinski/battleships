@@ -23,7 +23,7 @@ type App struct {
 	totalShots    int
 	hits          int
 	ui            *ui
-	customBoard   bool
+	customBoard   []string
 	oppFleet      map[int]int
 	bot           *bot
 	useAssistant  bool
@@ -43,11 +43,6 @@ func (a *App) Run() error {
 		gamePayload, err := a.displayMenu()
 		if err != nil {
 			return fmt.Errorf("app.displayMenu: %w", err)
-		}
-
-		a.useBot = promptPlayer("Do you want a bot to play for you?")
-		if !a.useBot {
-			a.useAssistant = promptPlayer("Do you want to play with an assistant?")
 		}
 
 		err = a.initGame(gamePayload)
@@ -257,6 +252,9 @@ func (a *App) shoot(ctx context.Context) error {
 
 func (a *App) initGame(payload models.GamePayload) error {
 	a.reset()
+	if a.useBot = promptPlayer("Do you want a bot to play for you?"); !a.useBot {
+		a.useAssistant = promptPlayer("Do you want to play with an assistant?")
+	}
 
 	var err error
 	makeRequest(func() error {
@@ -326,6 +324,10 @@ func (a *App) initGame(payload models.GamePayload) error {
 	a.ui = newGameUi()
 	a.ui.renderNicks(a.status.Nick, a.status.Opponent)
 	a.ui.renderDescriptions(a.status.Desc, a.status.OppDesc)
+
+	if a.useAssistant {
+		a.ui.addAssistantInfo()
+	}
 	a.updateBoard()
 	return nil
 }
@@ -401,9 +403,8 @@ func (a *App) editBoard() error {
 				}
 			}
 		}
-		a.customBoard = true
-		a.playerBoard = board
-		log.Debug("app [editBoard]", "coords", getCoordsFromBoard(board))
+		a.customBoard = getCoordsFromBoard(board)
+		log.Debug("app [editBoard]", "coords", a.customBoard)
 	}()
 
 	ui.gui.Start(ctx, nil)
@@ -424,6 +425,8 @@ func (a *App) reset() {
 	a.oppFleet = map[int]int{4: 1, 3: 2, 2: 3, 1: 4}
 	a.hits = 0
 	a.totalShots = 0
+	a.useBot = false
+	a.useAssistant = false
 	a.bot = newBot()
 }
 
