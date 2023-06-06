@@ -74,7 +74,10 @@ func (a *App) Run() error {
 
 		if a.gameInProgress() {
 			log.Info("app [Run] - abandoning game")
-			err = a.client.AbandonGame()
+			makeRequest(func() error {
+				err = a.client.AbandonGame()
+				return err
+			})
 			if err != nil {
 				return fmt.Errorf("client.AbandonGame: %w", err)
 			}
@@ -82,7 +85,9 @@ func (a *App) Run() error {
 
 		select {
 		case err = <-errChan:
-			return err
+			if !errors.Is(err, ErrorGameEnded) {
+				return err
+			}
 		default:
 			continue
 		}
@@ -93,7 +98,6 @@ func (a *App) loop(ctx context.Context, errChan chan error, cancelFunc context.C
 	log.Info("app [Run] - starting gameloop", "status", a.status)
 	defer cancelFunc()
 	for a.gameInProgress() {
-
 		err := a.waitForYourTurn()
 		if err != nil {
 			if errors.Is(err, ErrorGameEnded) {
@@ -181,7 +185,7 @@ func (a *App) handleShot(ctx context.Context) (string, error) {
 		a.updateBoard()
 	}
 	for {
-		coords := a.ui.board2.Listen(context.TODO())
+		coords := a.ui.board2.Listen(ctx)
 		x, y, err := parseCoords(coords)
 		if err != nil {
 			return "", fmt.Errorf("parseCoords: %w", err)
@@ -217,6 +221,9 @@ func (a *App) shoot(ctx context.Context) error {
 			return err
 		})
 		if err != nil {
+			if errors.Is(err, client.ErrBadRequest) {
+				return ErrorGameEnded
+			}
 			return fmt.Errorf("client.Fire: %w", err)
 		}
 
