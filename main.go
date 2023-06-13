@@ -31,7 +31,7 @@ func main() {
 	//}
 	//os.Exit(0)
 
-	logPath := fmt.Sprintf("log/%s.log", time.Now().Format("02-01-2006"))
+	logPath := fmt.Sprintf("%s.log", time.Now().Format("02-01-2006"))
 	if len(os.Args) > 1 {
 		logPath = os.Args[1]
 	}
